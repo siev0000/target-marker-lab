@@ -1,0 +1,55 @@
+:root {
+  color: #d9f8ff;
+  background: #06131d;
+  font-family: "Yu Gothic UI", "Meiryo", sans-serif;
+  font-synthesis: none;
+}
+
+* { box-sizing: border-box; }
+
+body { margin: 0; min-width: 320px; min-height: 100vh; }
+button, input { font: inherit; }
+button { cursor: pointer; }
+
+.lab-shell {
+  min-height: 100vh;
+  overflow: hidden;
+  background:
+    radial-gradient(circle at 50% 28%, rgb(46 181 208 / 18%), transparent 34rem),
+    linear-gradient(135deg, #081a25, #03090e 68%);
+}
+
+.lab-home {
+  width: min(960px, calc(100vw - 32px));
+  margin: 0 auto;
+  padding: 72px 0 40px;
+}
+
+.eyebrow { margin: 0; color: #5eeaff; font-family: monospace; font-size: 0.8rem; letter-spacing: 0.18em; }
+h1 { margin: 8px 0; font-size: clamp(2rem, 7vw, 4rem); letter-spacing: 0.04em; }
+.lab-home header > p:last-child { color: #99b8c1; }
+
+.home-actions { display: flex; flex-wrap: wrap; gap: 10px; margin: 28px 0; }
+.home-actions button {
+  border: 1px solid #2c7283;
+  border-radius: 5px;
+  padding: 10px 16px;
+  color: #d9f8ff;
+  background: #0a2430;
+}
+.home-actions .primary { border-color: #6eeeff; color: #06131d; background: #67d9ed; font-weight: 700; }
+.import-error { color: #ff9292; }
+
+.home-preview {
+  position: relative;
+  display: grid;
+  min-height: min(62vw, 560px);
+  place-items: center;
+  overflow: hidden;
+  border: 1px solid #1f6375;
+  background:
+    linear-gradient(90deg, rgb(98 226 255 / 5%) 1px, transparent 1px),
+    linear-gradient(rgb(98 226 255 / 5%) 1px, transparent 1px),
+    #06151e;
+  background-size: 28px 28px;
+}
