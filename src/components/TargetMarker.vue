@@ -197,8 +197,22 @@
             ]"
             :style="getCustomRingStyle(ring)"
           >
+            <template v-if="getCustomRenderMode(ring) === 'textRing'">
+              <span
+                v-for="(text, textIndex) in getCustomTextItems(ring)"
+                :key="`${textIndex}-${text}`"
+                class="custom-marker-ring-segment custom-text-item"
+                :class="getCustomSegmentAnimationClasses(ring)"
+                :style="getCustomTextItemStyle(ring, textIndex)"
+              >
+                <span
+                  class="custom-text-glyph"
+                  :class="{ 'is-counter-rotating': isCustomTextCounterRotating(ring) }"
+                >{{ text }}</span>
+              </span>
+            </template>
             <svg
-              v-if="getCustomRenderMode(ring) === 'segmentedArc'"
+              v-else-if="getCustomRenderMode(ring) === 'segmentedArc'"
               viewBox="0 0 100 100"
               preserveAspectRatio="none"
               class="custom-marker-ring-segment custom-special-layer"
@@ -415,8 +429,27 @@ const getCustomRingMotion = ring => {
 const isCustomRingAnimated = ring => getCustomRingMotion(ring).enabled !== false
 const isCustomRingRotationEnabled = ring => getCustomRingMotion(ring).rotateEnabled === true
 const isCustomRingPulseEnabled = ring => getCustomRingMotion(ring).pulseEnabled === true
+const isCustomTextCounterRotating = ring => ring.textOrientation === 'upright'
+  && isCustomRingAnimated(ring)
+  && isCustomRingRotationEnabled(ring)
 const getCustomRingSplitCount = ring => Math.min(8, Math.max(1, Number(ring.splitCount) || 1))
-const CUSTOM_RENDER_MODES = new Set(['continuous', 'segmentedArc', 'circumference', 'free', 'center', 'connection'])
+const CUSTOM_TEXT_LIMIT = 64
+const splitCustomText = value => {
+  const text = String(value || '')
+  if (typeof Intl !== 'undefined' && Intl.Segmenter) {
+    const segmenter = new Intl.Segmenter('ja', { granularity: 'grapheme' })
+    return Array.from(segmenter.segment(text), segment => segment.segment).slice(0, CUSTOM_TEXT_LIMIT)
+  }
+  return Array.from(text).slice(0, CUSTOM_TEXT_LIMIT)
+}
+const getCustomTextItems = ring => {
+  if (ring.textMode === 'labels') {
+    const count = Math.min(CUSTOM_TEXT_LIMIT, Math.max(1, Number(ring.splitCount) || 1))
+    return Array.from({ length: count }, (_, index) => String(ring.segmentLabels?.[index] || ''))
+  }
+  return splitCustomText(ring.textContent)
+}
+const CUSTOM_RENDER_MODES = new Set(['continuous', 'segmentedArc', 'circumference', 'free', 'center', 'connection', 'textRing'])
 const getCustomRenderMode = ring => CUSTOM_RENDER_MODES.has(ring.renderMode)
   ? ring.renderMode
   : ring.layout === 'arc' ? 'circumference' : 'continuous'
@@ -479,7 +512,9 @@ const getCustomRingSplitDirection = ring => {
   return width >= height ? 'is-split-horizontal' : 'is-split-vertical'
 }
 const getCustomSegmentVisualStyle = (ring, index = 0) => {
-  const count = getCustomRingSplitCount(ring)
+  const count = getCustomRenderMode(ring) === 'textRing'
+    ? Math.max(1, getCustomTextItems(ring).length)
+    : getCustomRingSplitCount(ring)
   const motion = getCustomRingMotion(ring)
   const segmentColor = ring.useSegmentColors
     ? ring.segmentColors?.[index] || ring.color || customMarkerSettings.value.color
@@ -492,6 +527,34 @@ const getCustomSegmentVisualStyle = (ring, index = 0) => {
     '--custom-segment-fill-opacity': String(ring.fillEnabled ? Math.min(100, Math.max(0, Number(ring.fillOpacity) || 0)) / 100 : 0),
     '--custom-segment-dash': ring.shape === 'wave' ? '96 48 96 48' : flowing ? '14 8' : lineStyle === 'dashed' ? '14 8' : lineStyle === 'dotted' ? '2 7' : 'none',
     '--custom-segment-delay': `${index * Math.max(0.1, Number(motion.segmentSequenceDuration) || 2) / count}s`
+  }
+}
+const getCustomTextItemStyle = (ring, index) => {
+  const items = getCustomTextItems(ring)
+  const count = Math.max(1, items.length)
+  const radius = Math.min(70, Math.max(0, Number(ring.textRadius) || 45))
+  const spacing = Math.min(200, Math.max(25, Number(ring.textSpacing) || 100)) / 100
+  const startAngle = Math.min(359, Math.max(0, Number(ring.arcAngle) || 270))
+  const direction = ring.textDirection === 'counterclockwise' ? -1 : 1
+  const angle = startAngle + direction * 360 / count * spacing * index
+  const radians = angle * Math.PI / 180
+  const orientation = ['outward', 'inward', 'upright'].includes(ring.textOrientation)
+    ? ring.textOrientation
+    : 'outward'
+  const textAngle = orientation === 'upright' ? 0 : orientation === 'inward' ? angle - 90 : angle + 90
+  const fontSize = Math.min(40, Math.max(6, Number(ring.textSize) || 14))
+  const fontWeight = ['normal', 'bold'].includes(ring.textWeight) ? ring.textWeight : 'bold'
+
+  return {
+    ...getCustomSegmentVisualStyle(ring, index),
+    left: `calc(50% + ${Math.cos(radians) * radius}%)`,
+    top: `calc(50% + ${Math.sin(radians) * radius}%)`,
+    width: 'auto',
+    height: 'auto',
+    translate: '-50% -50%',
+    rotate: `${textAngle}deg`,
+    fontSize: `${fontSize}px`,
+    fontWeight
   }
 }
 const getCustomRingSegmentStyle = (ring, index) => {
@@ -612,7 +675,7 @@ const getCustomRingStyle = ring => {
   const color = ring.color || customMarkerSettings.value.color
   const glowColor = ring.glowColor || color
   const mode = getCustomRenderMode(ring)
-  const isArc = mode === 'circumference'
+  const isArc = ['circumference', 'textRing'].includes(mode)
   const isCentered = ['continuous', 'segmentedArc', 'center', 'connection'].includes(mode)
   const useEvenSpacing = !isArc && ring.evenSpacing && renderCount > 1
   return {
@@ -2952,6 +3015,25 @@ onBeforeUnmount(() => {
     rotate var(--custom-morph-duration) var(--custom-morph-easing);
 }
 
+.custom-text-item {
+  position: absolute;
+  display: block;
+  color: var(--custom-segment-color);
+  line-height: 1;
+  white-space: pre;
+  text-align: center;
+  text-shadow: 0 0 var(--custom-ring-glow-size) var(--custom-ring-glow-color);
+  filter: drop-shadow(0 0 var(--custom-ring-glow-size) var(--custom-ring-glow-color));
+  user-select: none;
+}
+.custom-text-glyph {
+  display: block;
+}
+.custom-text-glyph.is-counter-rotating {
+  animation: customTextCounterOrbit var(--custom-ring-rotate-duration) linear var(--custom-ring-delay) var(--custom-ring-iteration);
+  animation-direction: var(--custom-ring-direction);
+}
+
 .custom-segment-fill,
 .custom-segment-line {
   vector-effect: non-scaling-stroke;
@@ -2991,6 +3073,16 @@ onBeforeUnmount(() => {
 .custom-marker-ring-segment.is-sequenced {
   animation: customSegmentSequence var(--custom-sequence-duration) linear infinite;
   animation-delay: var(--custom-segment-delay);
+}
+.custom-text-item.is-glow-animated {
+  animation: customGlowPulse var(--custom-glow-duration) ease-in-out infinite;
+}
+.custom-text-item.is-sequenced.is-glow-animated {
+  animation-name: customSegmentSequence, customGlowPulse;
+  animation-duration: var(--custom-sequence-duration), var(--custom-glow-duration);
+  animation-timing-function: linear, ease-in-out;
+  animation-iteration-count: infinite, infinite;
+  animation-delay: var(--custom-segment-delay), 0s;
 }
 .custom-marker-ring-segment.is-glow-animated .custom-segment-line {
   animation: customGlowPulse var(--custom-glow-duration) ease-in-out infinite;
@@ -3052,6 +3144,10 @@ onBeforeUnmount(() => {
 @keyframes customMarkerOrbit {
   from { transform: rotate(0deg); }
   to { transform: rotate(360deg); }
+}
+
+@keyframes customTextCounterOrbit {
+  to { rotate: -360deg; }
 }
 
 @keyframes customMarkerPulse {
