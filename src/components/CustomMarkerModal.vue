@@ -73,11 +73,11 @@
               :key="ring.id"
               type="button"
               :class="{ active: selectedRingId === ring.id, hidden: getRingAppearance(ring).visible === false }"
-              :title="`リング ${index + 1}を編集`"
+               :title="`${getRingName(ring, index)}を編集`"
               @click="selectRing(ring.id)"
             >
               <span class="ring-tab-color" :style="{ backgroundColor: getRingAppearance(ring).color }"></span>
-              <span>リング {{ index + 1 }}</span>
+               <span>{{ getRingName(ring, index) }}</span>
             </button>
           </div>
         </div>
@@ -104,7 +104,10 @@
             <div class="library-toolbar">
               <button type="button" :disabled="savedMarkers.length >= MAX_SAVED_MARKERS" @click="saveNewMarker">新規保存</button>
               <button type="button" :disabled="!selectedSavedMarkerId" @click="overwriteSavedMarker">選択中へ上書き</button>
+              <button type="button" @click="copyMarkerSettings">設定をコピー</button>
+              <button type="button" @click="exportMarkerSettings">JSON保存</button>
             </div>
+            <p class="library-export-note">作成中の停止時・移動時設定をJSONとしてコピー、またはファイル出力できます。</p>
             <div v-if="libraryNotice" class="library-notice">{{ libraryNotice }}</div>
             <div v-if="savedMarkers.length === 0" class="library-empty">保存されたマーカーはありません。</div>
             <div v-else class="marker-library-list">
@@ -272,6 +275,12 @@
             <p class="render-mode-description">
               {{ renderModes.find(mode => mode.key === selectedRingAppearance.renderMode)?.description }}
             </p>
+            <label v-if="!['segmentedArc', 'connection'].includes(selectedRingAppearance.renderMode)" class="setting-row select-row">
+              <span>形状</span>
+              <select v-model="selectedRingAppearance.shape" @change="onRingShapeChange">
+                <option v-for="shape in shapes" :key="shape.key" :value="shape.key">{{ shape.label }}</option>
+              </select>
+            </label>
             <label class="setting-row">
               <span>色</span>
               <input v-model="selectedRingAppearance.color" type="color" />
@@ -279,12 +288,12 @@
             </label>
             <label v-if="selectedRingAppearance.renderMode !== 'textRing'" class="setting-row">
               <span>横幅</span>
-              <input v-model.number="selectedRingAppearance.width" type="range" min="10" max="140" step="1" />
+              <input v-model.number="selectedRingAppearance.width" type="range" min="1" max="140" step="1" />
               <output>{{ selectedRingAppearance.width }}%</output>
             </label>
             <label v-if="selectedRingAppearance.renderMode !== 'textRing'" class="setting-row">
               <span>縦幅</span>
-              <input v-model.number="selectedRingAppearance.height" type="range" min="10" max="140" step="1" />
+              <input v-model.number="selectedRingAppearance.height" type="range" min="1" max="140" step="1" />
               <output>{{ selectedRingAppearance.height }}%</output>
             </label>
             <label v-if="['segmentedArc', 'circumference', 'connection'].includes(selectedRingAppearance.renderMode) || (selectedRingAppearance.renderMode === 'textRing' && selectedRingAppearance.textMode === 'labels')" class="setting-row">
@@ -311,20 +320,55 @@
                   <input v-model="selectedRingAppearance.segmentLabels[index - 1]" type="text" maxlength="8" />
                 </label>
               </div>
-              <label class="setting-row">
+              <label class="setting-row select-row">
+                <span>文字の配置</span>
+                <select v-model="selectedRingAppearance.textLayout">
+                  <option value="circle">円周</option>
+                  <option value="shape">形状に沿う</option>
+                </select>
+              </label>
+              <label class="setting-row select-row">
+                <span>配置基準リング</span>
+                <select v-model="selectedRingAppearance.textReferenceRingId">
+                  <option value="self">この文字リング</option>
+                  <option
+                    v-for="(ring, index) in draft.rings"
+                    :key="ring.id"
+                    :value="ring.id"
+                    :disabled="ring.id === selectedRing.id"
+                  >{{ getRingName(ring, index) }}</option>
+                </select>
+              </label>
+              <p v-if="selectedRingAppearance.textReferenceRingId !== 'self'" class="setting-hint">選択したリングの形・縦横比・角度・位置に文字を合わせます。</p>
+              <label v-if="selectedRingAppearance.textReferenceRingId !== 'self'" class="setting-row">
+                <span>基準からの大きさ</span>
+                <input v-model.number="selectedRingAppearance.textReferenceScale" type="range" min="50" max="160" step="1" />
+                <output>{{ selectedRingAppearance.textReferenceScale }}%</output>
+              </label>
+              <p v-if="selectedRingAppearance.textLayout === 'shape'" class="setting-hint">円・四角・三角・菱形・星・G5オービットの輪郭に沿って配置します。</p>
+              <label v-if="selectedRingAppearance.textLayout !== 'shape'" class="setting-row">
                 <span>配置半径</span>
                 <input v-model.number="selectedRingAppearance.textRadius" type="range" min="0" max="70" step="1" />
                 <output>{{ selectedRingAppearance.textRadius }}%</output>
               </label>
-              <label class="setting-row">
+              <label v-if="!selectedRingAppearance.textEvenSpacing" class="setting-row">
                 <span>文字間隔</span>
                 <input v-model.number="selectedRingAppearance.textSpacing" type="range" min="25" max="200" step="5" />
                 <output>{{ selectedRingAppearance.textSpacing }}%</output>
               </label>
+              <label class="toggle-row">
+                <input v-model="selectedRingAppearance.textEvenSpacing" type="checkbox" />
+                <span>文字を均等配置する</span>
+              </label>
+              <label v-if="selectedRingAppearance.textEvenSpacing" class="setting-row">
+                <span>配置範囲</span>
+                <input v-model.number="selectedRingAppearance.textArcSpread" type="range" min="1" max="360" step="1" />
+                <output>{{ selectedRingAppearance.textLayout === 'shape' ? Math.round(selectedRingAppearance.textArcSpread / 360 * 100) + '%' : selectedRingAppearance.textArcSpread + '°' }}</output>
+              </label>
               <label class="setting-row">
-                <span>開始角度</span>
+                <span>{{ selectedRingAppearance.textLayout === 'shape' ? '開始位置' : '開始角度' }}</span>
                 <input v-model.number="selectedRingAppearance.arcAngle" type="range" min="0" max="359" step="1" />
-                <output>{{ selectedRingAppearance.arcAngle }}°</output>
+                <output>{{ selectedRingAppearance.textLayout === 'shape' ? Math.round(selectedRingAppearance.arcAngle / 359 * 100) + '%' : selectedRingAppearance.arcAngle + '°' }}</output>
               </label>
               <label class="setting-row">
                 <span>文字サイズ</span>
@@ -350,7 +394,9 @@
                 <select v-model="selectedRingAppearance.textOrientation">
                   <option value="outward">外向き</option>
                   <option value="inward">内向き</option>
+                  <option value="centerFacing">中央へ頭を向ける</option>
                   <option value="upright">常に正立</option>
+                  <option value="tangent">輪郭に沿う</option>
                 </select>
               </label>
             </template>
@@ -390,27 +436,34 @@
                 <option value="fixed">角度固定</option>
               </select>
             </label>
-            <label v-if="!['segmentedArc', 'connection', 'textRing'].includes(selectedRingAppearance.renderMode)" class="setting-row select-row">
-              <span>形状</span>
-              <select v-model="selectedRingAppearance.shape">
-                <option v-for="shape in shapes" :key="shape.key" :value="shape.key">{{ shape.label }}</option>
-              </select>
-            </label>
             <label v-if="!['connection', 'textRing'].includes(selectedRingAppearance.renderMode)" class="setting-row">
               <span>角度</span>
               <input v-model.number="selectedRingAppearance.angle" type="range" min="0" max="359" step="1" />
               <output>{{ selectedRingAppearance.angle }}°</output>
             </label>
-            <label v-if="selectedRingAppearance.renderMode === 'free'" class="setting-row">
-              <span>横位置</span>
-              <input v-model.number="selectedRingAppearance.offsetX" type="range" min="-50" max="50" step="1" />
-              <output>{{ selectedRingAppearance.offsetX }}%</output>
-            </label>
-            <label v-if="selectedRingAppearance.renderMode === 'free'" class="setting-row">
-              <span>縦位置</span>
-              <input v-model.number="selectedRingAppearance.offsetY" type="range" min="-50" max="50" step="1" />
-              <output>{{ selectedRingAppearance.offsetY }}%</output>
-            </label>
+            <template v-if="selectedRingAppearance.shape === 'magitechWave'">
+              <p class="setting-group-label">G4ウェーブ</p>
+              <label class="setting-row">
+                <span>ブレ幅</span>
+                <input v-model.number="selectedRingAppearance.waveAmplitude" type="range" min="0" max="10" step="0.5" />
+                <output>{{ selectedRingAppearance.waveAmplitude }}</output>
+              </label>
+              <label class="setting-row">
+                <span>波の数</span>
+                <input v-model.number="selectedRingAppearance.waveCount" type="range" min="1" max="24" step="1" />
+                <output>{{ selectedRingAppearance.waveCount }}</output>
+              </label>
+              <label class="setting-row">
+                <span>ランダムさ</span>
+                <input v-model.number="selectedRingAppearance.waveRandomness" type="range" min="0" max="100" step="1" />
+                <output>{{ selectedRingAppearance.waveRandomness }}%</output>
+              </label>
+              <label class="setting-row">
+                <span>揺れ速度</span>
+                <input v-model.number="selectedRingAppearance.waveSpeed" type="range" min="0" max="3" step="0.1" />
+                <output>{{ selectedRingAppearance.waveSpeed.toFixed(1) }}x</output>
+              </label>
+            </template>
             <label v-if="selectedRingAppearance.renderMode === 'connection'" class="toggle-row">
               <input v-model="selectedRingAppearance.connectionClosed" type="checkbox" />
               <span>最後の点を最初の点へ接続</span>
@@ -470,6 +523,75 @@
                 <input v-model="selectedRingAppearance.segmentColors[index - 1]" type="color" />
               </label>
             </div>
+            <details class="ring-advanced-settings">
+              <summary>詳細設定</summary>
+              <p>このリングだけに適用する名前、位置、反転、重なり方、線の見た目を設定します。</p>
+              <label class="setting-row text-setting-row">
+                <span>リング名</span>
+                <input v-model="selectedRing.name" class="text-value-input" type="text" maxlength="20" placeholder="リング名" />
+              </label>
+              <label class="setting-row">
+                <span>横位置</span>
+                <input v-model.number="selectedRingAppearance.offsetX" type="range" min="-50" max="50" step="1" />
+                <output>{{ selectedRingAppearance.offsetX }}%</output>
+              </label>
+              <label class="setting-row">
+                <span>縦位置</span>
+                <input v-model.number="selectedRingAppearance.offsetY" type="range" min="-50" max="50" step="1" />
+                <output>{{ selectedRingAppearance.offsetY }}%</output>
+              </label>
+              <label class="setting-row">
+                <span>重なり順</span>
+                <input v-model.number="selectedRingAppearance.zIndex" type="range" min="0" max="32" step="1" />
+                <output>{{ selectedRingAppearance.zIndex }}</output>
+              </label>
+              <label class="setting-row select-row">
+                <span>合成方法</span>
+                <select v-model="selectedRingAppearance.blendMode">
+                  <option value="normal">通常</option>
+                  <option value="screen">スクリーン</option>
+                  <option value="plus-lighter">加算</option>
+                  <option value="lighten">比較（明）</option>
+                </select>
+              </label>
+              <div class="advanced-toggle-pair">
+                <label class="toggle-row"><input v-model="selectedRingAppearance.flipX" type="checkbox" /><span>左右反転</span></label>
+                <label class="toggle-row"><input v-model="selectedRingAppearance.flipY" type="checkbox" /><span>上下反転</span></label>
+              </div>
+              <template v-if="selectedRingAppearance.renderMode !== 'textRing'">
+                <label class="setting-row select-row">
+                  <span>線端</span>
+                  <select v-model="selectedRingAppearance.lineCap">
+                    <option value="butt">平坦</option>
+                    <option value="round">丸</option>
+                    <option value="square">四角</option>
+                  </select>
+                </label>
+                <label class="setting-row select-row">
+                  <span>線の角</span>
+                  <select v-model="selectedRingAppearance.lineJoin">
+                    <option value="miter">尖り</option>
+                    <option value="round">丸</option>
+                    <option value="bevel">面取り</option>
+                  </select>
+                </label>
+                <label v-if="selectedRingAppearance.lineJoin === 'miter'" class="setting-row">
+                  <span>角の鋭さ</span>
+                  <input v-model.number="selectedRingAppearance.miterLimit" type="range" min="1" max="20" step="1" />
+                  <output>{{ selectedRingAppearance.miterLimit }}</output>
+                </label>
+                <label v-if="selectedRingAppearance.lineStyle !== 'solid'" class="setting-row">
+                  <span>破線の開始位置</span>
+                  <input v-model.number="selectedRingAppearance.dashOffset" type="range" min="-40" max="40" step="1" />
+                  <output>{{ selectedRingAppearance.dashOffset }}</output>
+                </label>
+                <label v-if="selectedRingAppearance.lineStyle === 'double'" class="setting-row">
+                  <span>二重線の間隔</span>
+                  <input v-model.number="selectedRingAppearance.doubleLineGap" type="range" min="0" max="40" step="1" />
+                  <output>{{ selectedRingAppearance.doubleLineGap }}%</output>
+                </label>
+              </template>
+            </details>
             <label class="toggle-row">
               <input v-model="selectedRingAppearance.visible" type="checkbox" />
               <span>このリングを表示</span>
@@ -506,6 +628,13 @@
                 <select v-model="selectedMotion.direction" :disabled="!selectedMotion.enabled">
                   <option value="normal">時計回り</option>
                   <option value="reverse">反時計回り</option>
+                </select>
+              </label>
+              <label v-if="selectedMotion.rotateEnabled && selectedRingAppearance.renderMode === 'textRing'" class="setting-row select-row">
+                <span>回転対象</span>
+                <select v-model="selectedMotion.rotateTarget" :disabled="!selectedMotion.enabled">
+                  <option value="whole">全体（文字位置も回転）</option>
+                  <option value="text">文字だけ（位置は固定）</option>
                 </select>
               </label>
             </section>
@@ -611,6 +740,7 @@ import TargetMarker from './TargetMarker.vue'
 const makeMotionState = overrides => ({
   enabled: true,
   rotateEnabled: true,
+  rotateTarget: 'whole',
   pulseEnabled: false,
   rotateDuration: 8,
   pulseDuration: 3,
@@ -677,11 +807,29 @@ const makeRingAppearance = overrides => ({
   fillOpacity: 30,
   useSegmentColors: false,
   segmentColors: Array(TEXT_ITEM_LIMIT).fill('#8fefff'),
+  zIndex: 0,
+  blendMode: 'normal',
+  flipX: false,
+  flipY: false,
+  lineCap: 'butt',
+  lineJoin: 'miter',
+  miterLimit: 4,
+  dashOffset: 0,
+  doubleLineGap: 18,
+  waveAmplitude: 4,
+  waveCount: 12,
+  waveRandomness: 55,
+  waveSpeed: 1,
   textMode: 'string',
+  textLayout: 'circle',
+  textReferenceRingId: 'self',
+  textReferenceScale: 100,
   textContent: 'TARGET LOCKED',
   segmentLabels: Array(TEXT_ITEM_LIMIT).fill(''),
   textRadius: 45,
   textSpacing: 100,
+  textEvenSpacing: false,
+  textArcSpread: 360,
   textSize: 14,
   textWeight: 'bold',
   textDirection: 'clockwise',
@@ -784,6 +932,7 @@ onBeforeUnmount(() => {
 
 const makeRing = index => ({
   id: `ring-${Date.now()}-${index}`,
+  name: `リング ${index}`,
   appearance: {
     idle: makeRingAppearance({ width: Math.max(20, 100 - index * 14), height: Math.max(20, 100 - index * 14) }),
     moving: makeRingAppearance({ width: Math.max(20, 100 - index * 14), height: Math.max(20, 100 - index * 14) })
@@ -842,6 +991,11 @@ const normalizeRingAppearance = ring => {
     lineWidth: Number(ring.lineWidth) || 2,
     shape: ring.shape || 'circle',
     lineStyle: ring.lineStyle || 'solid',
+    doubleLineGap: Number.isFinite(Number(ring.doubleLineGap)) ? Number(ring.doubleLineGap) : 18,
+    waveAmplitude: Number.isFinite(Number(ring.waveAmplitude)) ? Number(ring.waveAmplitude) : 4,
+    waveCount: Number.isFinite(Number(ring.waveCount)) ? Number(ring.waveCount) : 12,
+    waveRandomness: Number.isFinite(Number(ring.waveRandomness)) ? Number(ring.waveRandomness) : 55,
+    waveSpeed: Number.isFinite(Number(ring.waveSpeed)) ? Number(ring.waveSpeed) : 1,
     glow: Number(ring.glow) || 0,
     glowColor: ring.glowColor || ring.color || '#8fefff',
     fillEnabled: ring.fillEnabled === true,
@@ -850,14 +1004,19 @@ const normalizeRingAppearance = ring => {
     useSegmentColors: ring.useSegmentColors === true,
     segmentColors: Array.from({ length: TEXT_ITEM_LIMIT }, (_, index) => ring.segmentColors?.[index] || ring.color || '#8fefff'),
     textMode: ring.textMode === 'labels' ? 'labels' : 'string',
+    textLayout: ring.textLayout === 'shape' ? 'shape' : 'circle',
+    textReferenceRingId: typeof ring.textReferenceRingId === 'string' && ring.textReferenceRingId ? ring.textReferenceRingId : 'self',
+    textReferenceScale: Number.isFinite(Number(ring.textReferenceScale)) ? Number(ring.textReferenceScale) : 100,
     textContent: String(ring.textContent || 'TARGET LOCKED').slice(0, TEXT_ITEM_LIMIT),
     segmentLabels: makeTextItemArray(ring.segmentLabels),
     textRadius: Number(ring.textRadius) || 45,
     textSpacing: Number(ring.textSpacing) || 100,
+    textEvenSpacing: ring.textEvenSpacing === true,
+    textArcSpread: Number(ring.textArcSpread) || 360,
     textSize: Number(ring.textSize) || 14,
     textWeight: ring.textWeight === 'normal' ? 'normal' : 'bold',
     textDirection: ring.textDirection === 'counterclockwise' ? 'counterclockwise' : 'clockwise',
-    textOrientation: ['outward', 'inward', 'upright'].includes(ring.textOrientation) ? ring.textOrientation : 'outward',
+    textOrientation: ['outward', 'inward', 'centerFacing', 'upright', 'tangent'].includes(ring.textOrientation) ? ring.textOrientation : 'outward',
     visible: ring.visible !== false
   })
   const idleState = ring.appearance?.idle || {}
@@ -946,7 +1105,7 @@ const savedMarkers = ref(readMarkerLibrary())
 const selectedSavedMarkerId = ref(null)
 const libraryName = ref('')
 const libraryNotice = ref('')
-const activeSection = ref('overall')
+const activeSection = ref('rings')
 const appliedPresetKey = ref(null)
 const selectedRingId = ref(draft.value.rings[0].id)
 const selectedRingIndex = computed(() => Math.max(0, draft.value.rings.findIndex(ring => ring.id === selectedRingId.value)))
@@ -964,6 +1123,7 @@ const selectedRingItemCount = computed(() => {
   return Math.min(8, Math.max(1, Number(appearance.splitCount) || 1))
 })
 const getRingAppearance = ring => ring.appearance[editingState.value]
+const getRingName = (ring, index) => ring.name?.trim() || `リング ${index + 1}`
 const selectRing = ringId => {
   selectedRingId.value = ringId
   highlightedRingId.value = null
@@ -987,6 +1147,45 @@ const persistMarkerLibrary = () => {
   }
 }
 const markerNameForSave = () => libraryName.value.trim().slice(0, 32) || `マーカー ${savedMarkers.value.length + 1}`
+const markerSettingsJson = () => JSON.stringify({
+  version: 1,
+  name: markerNameForSave(),
+  exportedAt: new Date().toISOString(),
+  settings: cloneMarkerSettings(draft.value)
+}, null, 2)
+const copyMarkerSettings = async () => {
+  const text = markerSettingsJson()
+  try {
+    await navigator.clipboard.writeText(text)
+    libraryNotice.value = '作成中の設定JSONをクリップボードへコピーしました。'
+  } catch {
+    const textarea = document.createElement('textarea')
+    textarea.value = text
+    textarea.style.position = 'fixed'
+    textarea.style.opacity = '0'
+    document.body.append(textarea)
+    textarea.select()
+    const copied = document.execCommand('copy')
+    textarea.remove()
+    libraryNotice.value = copied
+      ? '作成中の設定JSONをクリップボードへコピーしました。'
+      : 'コピーできませんでした。JSON保存を利用してください。'
+  }
+}
+const exportMarkerSettings = () => {
+  const json = markerSettingsJson()
+  const fileName = markerNameForSave().replace(/[\\/:*?"<>|]/g, '_')
+  const blob = new Blob([json], { type: 'application/json' })
+  const url = URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = url
+  link.download = `${fileName || 'target-marker'}.json`
+  document.body.append(link)
+  link.click()
+  link.remove()
+  URL.revokeObjectURL(url)
+  libraryNotice.value = '作成中の設定JSONを保存しました。'
+}
 const selectSavedMarker = marker => {
   selectedSavedMarkerId.value = marker.id
   libraryName.value = marker.name
@@ -1048,8 +1247,18 @@ const deleteSavedMarker = markerId => {
 const setOverallShape = shape => {
   selectedOverall.value.shape = shape
   draft.value.rings.forEach(ring => {
-    ring.appearance[editingState.value].shape = shape
+    const appearance = ring.appearance[editingState.value]
+    appearance.shape = shape
+    if (shape === 'point') {
+      appearance.fillEnabled = true
+      appearance.fillOpacity = 100
+    }
   })
+}
+const onRingShapeChange = () => {
+  if (selectedRingAppearance.value.shape !== 'point') return
+  selectedRingAppearance.value.fillEnabled = true
+  selectedRingAppearance.value.fillOpacity = 100
 }
 const requestOverallShapeChange = shape => {
   if (shape === selectedOverall.value.shape) return
@@ -1079,9 +1288,11 @@ const setRenderMode = mode => {
   } else if (mode === 'textRing') {
     appearance.layout = 'straight'
     appearance.textMode = appearance.textMode === 'labels' ? 'labels' : 'string'
+    appearance.textLayout = appearance.textLayout === 'shape' ? 'shape' : 'circle'
     appearance.textContent ||= 'TARGET LOCKED'
     appearance.textRadius ||= 45
     appearance.textSpacing ||= 100
+    appearance.textArcSpread ||= 360
     appearance.textSize ||= 14
   } else {
     appearance.layout = 'straight'
@@ -1111,16 +1322,17 @@ const previewBackgroundStyle = computed(() => ({
 }))
 
 const sections = [
-  { key: 'library', label: '保存' },
-  { key: 'existing', label: '既存' },
-  { key: 'display', label: '表示設定' },
-  { key: 'overall', label: '全体設定' },
   { key: 'rings', label: 'リング' },
-  { key: 'motion', label: '動き' }
+  { key: 'motion', label: '動き' },
+  { key: 'overall', label: '全体設定' },
+  { key: 'display', label: '表示設定' },
+  { key: 'existing', label: '既存' },
+  { key: 'library', label: '保存' }
 ]
 
 const shapes = [
   { key: 'circle', label: '円' },
+  { key: 'point', label: '点' },
   { key: 'square', label: '四角' },
   { key: 'triangle', label: '三角' },
   { key: 'diamond', label: '菱形' },
@@ -1162,6 +1374,7 @@ const presetRing = (appearance, motion = {}, movingAppearance = {}, movingMotion
   movingMotion
 })
 const nodeColors = ['#63f58c', '#ffe45c', '#5faeff', '#ffffff', '#b8ff62', '#63f58c', '#ffe45c', '#5faeff']
+const g45NodeColors = ['#63f58c', '#ffe45c', '#5faeff', '#ffffff', '#b8ff62']
 const existingMarkerPresets = [
   {
     key: 1,
@@ -1247,14 +1460,17 @@ const existingMarkerPresets = [
     key: 4.5,
     label: 'G4.5',
     color: '#7064dc',
+    behavior: { followCursor: true, cursorFollowDuration: 30, cursorFollowSpeed: 90 },
     rings: [
-      presetRing({ shape: 'magitechWave', width: 100, height: 100, lineWidth: 2 }, { enabled: true, rotateEnabled: true, rotateDuration: 8 }),
-      presetRing({ shape: 'circle', width: 76, height: 76, lineWidth: 1, opacity: 78 }),
-      presetRing({ renderMode: 'connection', width: 100, height: 100, splitCount: 5, arcRadius: 49, lineWidth: 2, opacity: 76 }, { enabled: true, rotateEnabled: true, rotateDuration: 8, glowEnabled: true, glowMin: 4, glowMax: 11 }),
-      presetRing({ shape: 'circle', width: 64, height: 18, splitCount: 5, equalizeSegments: true, layout: 'arc', evenSpacing: true, arcRadius: 49, arcOrientation: 'fixed', fillEnabled: true, fillOpacity: 80, useSegmentColors: true, segmentColors: nodeColors }, { enabled: true, rotateEnabled: true, rotateDuration: 8 }),
-      presetRing({ shape: 'arrowhead', width: 62, height: 15, splitCount: 5, equalizeSegments: true, layout: 'arc', evenSpacing: true, arcRadius: 59, arcOrientation: 'radial', fillEnabled: true, fillOpacity: 65 }, { enabled: true, rotateEnabled: true, rotateDuration: 12, direction: 'reverse' }),
+      presetRing({ shape: 'magitechWave', width: 124, height: 114, lineWidth: 2, waveAmplitude: 1.5, waveCount: 24, waveRandomness: 81 }, { enabled: true, rotateEnabled: true, rotateDuration: 8 }, { waveAmplitude: 4, waveCount: 12, waveRandomness: 55, waveSpeed: 1 }, { rotateDuration: 1 }),
+      presetRing({ shape: 'circle', width: 85, height: 85, lineWidth: 1, opacity: 78 }, staticMotion(), {}, { enabled: true, rotateEnabled: true, rotateDuration: 1 }),
+      presetRing({ renderMode: 'connection', width: 117, height: 117, splitCount: 5, arcRadius: 49, lineWidth: 2, opacity: 76 }, { enabled: true, rotateEnabled: true, rotateDuration: 8, glowEnabled: true, glowMin: 4, glowMax: 11 }, { width: 100, height: 100 }, { rotateDuration: 1 }),
+      presetRing({ shape: 'circle', width: 64, height: 18, splitCount: 5, equalizeSegments: true, layout: 'arc', evenSpacing: true, arcRadius: 49, arcOrientation: 'fixed', fillEnabled: true, fillOpacity: 80, useSegmentColors: true, segmentColors: g45NodeColors, lineStyle: 'double', doubleLineGap: 40, glow: 14, glowColor: '#c28cf8', blendMode: 'screen' }, { enabled: true, rotateEnabled: true, rotateDuration: 8 }, { lineStyle: 'solid', doubleLineGap: 18, glow: 8, glowColor: '#7064dc', blendMode: 'normal' }, { rotateDuration: 1 }),
+      presetRing({ shape: 'arrowhead', width: 62, height: 15, splitCount: 4, equalizeSegments: true, layout: 'arc', evenSpacing: true, arcRadius: 70, arcOrientation: 'radial', fillEnabled: true, fillOpacity: 65 }, { enabled: true, rotateEnabled: false, rotateDuration: 12, direction: 'reverse' }, { angle: 178 }),
       presetRing({ shape: 'circle', width: 24, height: 12, lineWidth: 2, opacity: 55 }),
-      presetRing({ shape: 'diamond', width: 8, height: 14, fillEnabled: true, fillOpacity: 65 })
+      presetRing({ shape: 'diamond', width: 8, height: 14, color: '#6a6572', fillEnabled: true, fillOpacity: 65 }),
+      presetRing({ shape: 'circle', width: 128, height: 128, color: '#722aac', glowColor: '#ae00ff' }, { enabled: true, rotateEnabled: true, rotateDuration: 8 }, {}, { rotateDuration: 1 }),
+      presetRing({ renderMode: 'circumference', shape: 'point', width: 10, height: 10, splitCount: 5, equalizeSegments: true, layout: 'arc', evenSpacing: true, arcSpread: 288, arcRadius: 49, lineWidth: 1, color: '#8fefff', glowColor: '#8fefff', fillColor: '#8fefff', fillEnabled: true, fillOpacity: 100 }, { enabled: true, rotateEnabled: true, rotateDuration: 8 }, { renderMode: 'continuous', shape: 'circle', width: 20, height: 20, splitCount: 1, equalizeSegments: false, evenSpacing: false, arcSpread: 90, arcRadius: 45, lineWidth: 2, fillEnabled: false, fillOpacity: 30 })
     ]
   },
   {
@@ -1429,7 +1645,7 @@ const applyExistingMarkerPreset = preset => {
       moving: { ...overall }
     },
     transition: { ...DEFAULT_SETTINGS.transition },
-    behavior: { ...draft.value.behavior },
+    behavior: { ...DEFAULT_SETTINGS.behavior, ...(preset.behavior || {}) },
     rings
   }
   appliedPresetKey.value = preset.key
@@ -1944,6 +2160,29 @@ p { margin-top: 8px; color: rgba(200, 240, 250, 0.72); font-size: 20px; line-hei
   color: #d7f7ff;
   cursor: pointer;
 }
+.ring-advanced-settings {
+  margin-top: 14px;
+  padding: 10px;
+  border: 1px solid rgba(126, 224, 245, 0.34);
+  background: rgba(5, 22, 34, 0.58);
+}
+.ring-advanced-settings summary {
+  color: #bdf7ff;
+  font-weight: 700;
+  cursor: pointer;
+}
+.ring-advanced-settings > p {
+  margin: 9px 0 12px;
+  color: rgba(205, 238, 247, 0.68);
+  font-size: 12px;
+  line-height: 1.5;
+}
+.advanced-toggle-pair {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin: 10px 0;
+}
 .render-mode-grid button.active {
   border-color: #c4faff;
   background: rgba(34, 112, 134, 0.9);
@@ -2067,6 +2306,12 @@ p { margin-top: 8px; color: rgba(200, 240, 250, 0.72); font-size: 20px; line-hei
 }
 .library-toolbar button { padding: 9px 10px; }
 .library-toolbar button:disabled { cursor: not-allowed; opacity: 0.4; }
+.library-export-note {
+  margin: 10px 0 0;
+  color: rgba(201, 248, 255, 0.72);
+  font-size: 18px;
+  line-height: 1.45;
+}
 .library-notice,
 .library-empty {
   margin-top: 14px;
