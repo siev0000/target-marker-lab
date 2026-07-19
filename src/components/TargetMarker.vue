@@ -486,6 +486,9 @@ const CUSTOM_SHAPE_PATHS = {
   arc: 'M8 68 A46 46 0 0 1 92 68',
   tick: 'M50 5 V30',
   star: 'M50 4 L61 36 L95 36 L68 56 L78 90 L50 70 L22 90 L32 56 L5 36 L39 36 Z',
+  // 2つの正三角形を同じ中心へ重ねた正六芒星。
+  hexagram: 'M50 4 L90 73 H10 Z M10 27 H90 L50 96 Z',
+  octagram: 'M50 3 L61 27 L84 16 L73 39 L97 50 L73 61 L84 84 L61 73 L50 97 L39 73 L16 84 L27 61 L3 50 L27 39 L16 16 L39 27 Z',
   sparkle: 'M50 3 C56 35 65 44 97 50 C65 56 56 65 50 97 C44 65 35 56 3 50 C35 44 44 35 50 3 Z',
   arrow: 'M5 34 H55 V14 L96 50 L55 86 V66 H5 Z',
   arrowhead: 'M12 8 L92 50 L12 92 L34 50 Z',
@@ -527,6 +530,28 @@ const getCustomTextPathPoint = (shape, progress) => {
     y: 50 + Math.sin(radians) * 46,
     tangent: angle + 90
   }
+}
+// 分割リングを基準にする場合は、輪郭を分割片ごとに等分する。
+// 文字群は担当する片の輪郭上だけへ配置されるため、四角や星でも形に沿う。
+const getCustomSegmentedTextPathProgress = (startAngle, direction, textIndex, textCount, ring) => {
+  const count = Math.min(8, Math.max(1, Number(ring?.splitCount) || 1))
+  const startProgress = ((startAngle + 90) / 360 % 1 + 1) % 1
+  if (count <= 1) return startProgress
+
+  const segmentLength = 1 / count
+  const requestedGap = Math.max(0, Number(ring?.splitGap) || 0) / 100
+  const gap = Math.min(segmentLength * 0.8, requestedGap)
+  const visibleLength = segmentLength - gap
+  const logicalSegmentIndex = Math.min(count - 1, Math.floor(textIndex * count / textCount))
+  const firstTextIndex = Math.ceil(logicalSegmentIndex * textCount / count)
+  const afterLastTextIndex = Math.ceil((logicalSegmentIndex + 1) * textCount / count)
+  const textCountInSegment = Math.max(1, afterLastTextIndex - firstTextIndex)
+  const textIndexInSegment = Math.max(0, textIndex - firstTextIndex)
+  const localProgress = textCountInSegment <= 1 ? 0.5 : textIndexInSegment / (textCountInSegment - 1)
+  const startSegment = Math.floor(startProgress * count) % count
+  const segmentIndex = (startSegment + direction * logicalSegmentIndex + count) % count
+  const progressInSegment = direction === -1 ? 1 - localProgress : localProgress
+  return segmentIndex * segmentLength + gap / 2 + progressInSegment * visibleLength
 }
 const getCustomMagitechWavePath = ring => {
   const waveCount = Math.min(24, Math.max(1, Number(ring?.waveCount) || 12))
@@ -570,7 +595,7 @@ const getCustomSegmentVisualStyle = (ring, index = 0) => {
     : ring.color || customMarkerSettings.value.color
   const lineStyle = ring.lineStyle || 'solid'
   const flowing = motion.lineFlowEnabled === true
-  const doubleLineGap = Math.min(40, Math.max(0, Number.isFinite(Number(ring.doubleLineGap)) ? Number(ring.doubleLineGap) : 18))
+  const doubleLineGap = Math.min(100, Math.max(0, Number.isFinite(Number(ring.doubleLineGap)) ? Number(ring.doubleLineGap) : 18))
   return {
     '--custom-segment-color': segmentColor,
     '--custom-segment-fill': ring.fillColor || segmentColor,
@@ -606,7 +631,16 @@ const getCustomTextItemStyle = (ring, index) => {
     ? customRings.value.find(candidate => candidate.id === ring.textReferenceRingId)
     : null
   const usesShapePath = ring.textLayout === 'shape' || referenceRing !== null
-  const pathProgress = (startAngle + direction * interval * index) / 360
+  const unsegmentedPathProgress = (startAngle + 90 + direction * interval * index) / 360
+  const textDivisionCount = Math.min(8, Math.max(1, Number(ring.textDivisionCount) || 1))
+  const divisionRing = textDivisionCount > 1
+    ? { ...ring, splitCount: textDivisionCount }
+    : referenceRing && getCustomRingSplitCount(referenceRing) > 1
+      ? referenceRing
+      : null
+  const pathProgress = divisionRing
+    ? getCustomSegmentedTextPathProgress(startAngle, direction, index, count, divisionRing)
+    : unsegmentedPathProgress
   const pathShape = referenceRing?.shape || ring.shape
   const rawPathPoint = usesShapePath ? getCustomTextPathPoint(pathShape, pathProgress) : null
   const referenceLegacySize = Number(referenceRing?.size) || 100

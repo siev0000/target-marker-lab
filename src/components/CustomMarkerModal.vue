@@ -104,10 +104,11 @@
             <div class="library-toolbar">
               <button type="button" :disabled="savedMarkers.length >= MAX_SAVED_MARKERS" @click="saveNewMarker">新規保存</button>
               <button type="button" :disabled="!selectedSavedMarkerId" @click="overwriteSavedMarker">選択中へ上書き</button>
-              <button type="button" @click="copyMarkerSettings">設定をコピー</button>
               <button type="button" @click="exportMarkerSettings">JSON保存</button>
+              <button type="button" @click="openMarkerSettingsFile">JSON読込</button>
             </div>
-            <p class="library-export-note">作成中の停止時・移動時設定をJSONとしてコピー、またはファイル出力できます。</p>
+            <input ref="markerSettingsFileInput" class="marker-settings-file-input" type="file" accept="application/json,.json" @change="importMarkerSettings" />
+            <p class="library-export-note">作成中の停止時・移動時設定をJSONとしてコピー・保存・読込できます。読込内容は決定するまで戦闘画面へ反映されません。</p>
             <div v-if="libraryNotice" class="library-notice">{{ libraryNotice }}</div>
             <div v-if="savedMarkers.length === 0" class="library-empty">保存されたマーカーはありません。</div>
             <div v-else class="marker-library-list">
@@ -314,7 +315,13 @@
                 <input v-model="selectedRingAppearance.textContent" class="text-value-input" type="text" maxlength="64" placeholder="TARGET LOCKED" />
                 <output>{{ countTextCharacters(selectedRingAppearance.textContent) }}/64</output>
               </label>
-              <div v-else class="segment-label-grid">
+              <label v-if="selectedRingAppearance.textMode === 'string'" class="setting-row">
+                <span>文字の分割数</span>
+                <input v-model.number="selectedRingAppearance.textDivisionCount" type="range" min="1" max="8" step="1" />
+                <output>{{ selectedRingAppearance.textDivisionCount }}</output>
+              </label>
+              <p v-if="selectedRingAppearance.textMode === 'string' && selectedRingAppearance.textDivisionCount > 1" class="setting-hint">文字列を分割片ごとに割り当て、選択した形状の輪郭に沿って配置します。</p>
+              <div v-if="selectedRingAppearance.textMode === 'labels'" class="segment-label-grid">
                 <label v-for="index in selectedRingItemCount" :key="index">
                   <span>{{ index }}</span>
                   <input v-model="selectedRingAppearance.segmentLabels[index - 1]" type="text" maxlength="8" />
@@ -587,7 +594,7 @@
                 </label>
                 <label v-if="selectedRingAppearance.lineStyle === 'double'" class="setting-row">
                   <span>二重線の間隔</span>
-                  <input v-model.number="selectedRingAppearance.doubleLineGap" type="range" min="0" max="40" step="1" />
+                  <input v-model.number="selectedRingAppearance.doubleLineGap" type="range" min="0" max="100" step="1" />
                   <output>{{ selectedRingAppearance.doubleLineGap }}%</output>
                 </label>
               </template>
@@ -736,6 +743,7 @@ import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { getCurrentScale } from '../useScale.js'
 import BaseHudModal from './BaseHudModal.vue'
 import TargetMarker from './TargetMarker.vue'
+import magicCircleExport from '../../../../memo/target-markers/魔法陣.json'
 
 const makeMotionState = overrides => ({
   enabled: true,
@@ -825,6 +833,7 @@ const makeRingAppearance = overrides => ({
   textReferenceRingId: 'self',
   textReferenceScale: 100,
   textContent: 'TARGET LOCKED',
+  textDivisionCount: 1,
   segmentLabels: Array(TEXT_ITEM_LIMIT).fill(''),
   textRadius: 45,
   textSpacing: 100,
@@ -1008,6 +1017,7 @@ const normalizeRingAppearance = ring => {
     textReferenceRingId: typeof ring.textReferenceRingId === 'string' && ring.textReferenceRingId ? ring.textReferenceRingId : 'self',
     textReferenceScale: Number.isFinite(Number(ring.textReferenceScale)) ? Number(ring.textReferenceScale) : 100,
     textContent: String(ring.textContent || 'TARGET LOCKED').slice(0, TEXT_ITEM_LIMIT),
+    textDivisionCount: Math.min(8, Math.max(1, Number(ring.textDivisionCount) || 1)),
     segmentLabels: makeTextItemArray(ring.segmentLabels),
     textRadius: Number(ring.textRadius) || 45,
     textSpacing: Number(ring.textSpacing) || 100,
@@ -1105,6 +1115,7 @@ const savedMarkers = ref(readMarkerLibrary())
 const selectedSavedMarkerId = ref(null)
 const libraryName = ref('')
 const libraryNotice = ref('')
+const markerSettingsFileInput = ref(null)
 const activeSection = ref('rings')
 const appliedPresetKey = ref(null)
 const selectedRingId = ref(draft.value.rings[0].id)
@@ -1153,25 +1164,6 @@ const markerSettingsJson = () => JSON.stringify({
   exportedAt: new Date().toISOString(),
   settings: cloneMarkerSettings(draft.value)
 }, null, 2)
-const copyMarkerSettings = async () => {
-  const text = markerSettingsJson()
-  try {
-    await navigator.clipboard.writeText(text)
-    libraryNotice.value = '作成中の設定JSONをクリップボードへコピーしました。'
-  } catch {
-    const textarea = document.createElement('textarea')
-    textarea.value = text
-    textarea.style.position = 'fixed'
-    textarea.style.opacity = '0'
-    document.body.append(textarea)
-    textarea.select()
-    const copied = document.execCommand('copy')
-    textarea.remove()
-    libraryNotice.value = copied
-      ? '作成中の設定JSONをクリップボードへコピーしました。'
-      : 'コピーできませんでした。JSON保存を利用してください。'
-  }
-}
 const exportMarkerSettings = () => {
   const json = markerSettingsJson()
   const fileName = markerNameForSave().replace(/[\\/:*?"<>|]/g, '_')
@@ -1185,6 +1177,32 @@ const exportMarkerSettings = () => {
   link.remove()
   URL.revokeObjectURL(url)
   libraryNotice.value = '作成中の設定JSONを保存しました。'
+}
+const openMarkerSettingsFile = () => markerSettingsFileInput.value?.click()
+const importMarkerSettings = async event => {
+  const input = event.target
+  const file = input.files?.[0]
+  input.value = ''
+  if (!file) return
+
+  try {
+    const parsed = JSON.parse(await file.text())
+    const settings = parsed?.settings && typeof parsed.settings === 'object' ? parsed.settings : parsed
+    if (!settings || typeof settings !== 'object' || Array.isArray(settings)) throw new Error('invalid settings')
+
+    draft.value = createDraftFromSettings(cloneMarkerSettings(settings))
+    selectedSavedMarkerId.value = null
+    libraryName.value = typeof parsed?.name === 'string' ? parsed.name.slice(0, 32) : file.name.replace(/\.json$/i, '').slice(0, 32)
+    selectedRingId.value = draft.value.rings[0].id
+    appliedPresetKey.value = null
+    pendingOverallShape.value = null
+    previewPosition.value = { x: 50, y: 50 }
+    selectEditingState('idle')
+    selectRing(selectedRingId.value)
+    libraryNotice.value = `「${file.name}」を読み込みました。決定するまで戦闘画面には反映されません。`
+  } catch {
+    libraryNotice.value = '設定JSONを読み込めませんでした。JSON保存で出力したファイルを選択してください。'
+  }
 }
 const selectSavedMarker = marker => {
   selectedSavedMarkerId.value = marker.id
@@ -1343,6 +1361,8 @@ const shapes = [
   { key: 'arc', label: '円弧' },
   { key: 'tick', label: '目盛り' },
   { key: 'star', label: '星' },
+  { key: 'hexagram', label: '六芒星' },
+  { key: 'octagram', label: '八芒星' },
   { key: 'sparkle', label: '十字星' },
   { key: 'arrow', label: '矢印 ⇒' },
   { key: 'arrowhead', label: '矢じり ➤' },
@@ -1498,6 +1518,61 @@ const existingMarkerPresets = [
     ]
   },
   {
+    key: 'magic-circle-json',
+    label: '魔法陣',
+    color: magicCircleExport.settings?.color || '#8fefff',
+    settings: magicCircleExport.settings
+  },
+  {
+    key: 'magic-star-ring',
+    label: '魔法陣・星環',
+    color: '#8fefff',
+    rings: [
+      presetRing({ shape: 'circle', width: 140, height: 140, lineStyle: 'double', lineWidth: 2 }, { enabled: true, rotateEnabled: true, rotateDuration: 8 }, { width: 58, height: 58, lineStyle: 'solid' }),
+      presetRing({ renderMode: 'textRing', shape: 'circle', textLayout: 'shape', textContent: '1234512345123451234512345123451234512345', textReferenceScale: 90, textEvenSpacing: true, arcAngle: 359, textSize: 13, textOrientation: 'centerFacing', glow: 0 }, { enabled: true, rotateEnabled: true, rotateDuration: 8 }, { renderMode: 'continuous', shape: 'circle', width: 58, height: 58 }),
+      presetRing({ shape: 'square', width: 100, height: 100, lineStyle: 'double', doubleLineGap: 45, lineWidth: 2 }, { enabled: true, rotateEnabled: true, rotateDuration: 8 }, { shape: 'circle', width: 30, height: 30, lineStyle: 'solid' }),
+      presetRing({ shape: 'square', width: 100, height: 100, angle: 45, lineStyle: 'double', doubleLineGap: 45, lineWidth: 2 }, { enabled: true, rotateEnabled: true, rotateDuration: 8 }, { shape: 'circle', width: 30, height: 30, lineStyle: 'solid' }),
+      presetRing({ renderMode: 'circumference', shape: 'diamond', width: 5, height: 58, splitCount: 8, evenSpacing: true, arcRadius: 30, arcOrientation: 'radial', fillEnabled: true, fillOpacity: 100, lineWidth: 1 }, { enabled: true, rotateEnabled: true, rotateDuration: 8 }),
+      presetRing({ renderMode: 'circumference', shape: 'diamond', width: 3, height: 35, splitCount: 8, evenSpacing: true, arcRadius: 25, arcAngle: 23, arcOrientation: 'radial', fillEnabled: true, fillOpacity: 100, lineWidth: 1 }, { enabled: true, rotateEnabled: true, rotateDuration: 8 }),
+      presetRing({ shape: 'circle', width: 96, height: 96, lineWidth: 2 }, { enabled: true, rotateEnabled: true, rotateDuration: 8 }, { width: 20, height: 20 }),
+      presetRing({ renderMode: 'circumference', shape: 'circle', width: 14, height: 9, splitCount: 8, evenSpacing: true, arcRadius: 49, arcAngle: 67, arcOrientation: 'tangent', lineStyle: 'double', doubleLineGap: 25, lineWidth: 2, fillEnabled: true, fillOpacity: 100 }, { enabled: true, rotateEnabled: true, rotateDuration: 8 }),
+      presetRing({ renderMode: 'circumference', shape: 'line', width: 33, height: 140, splitCount: 8, evenSpacing: true, arcRadius: 50, arcAngle: 45, arcOrientation: 'radial', angle: 90, lineWidth: 2 }, { enabled: true, rotateEnabled: true, rotateDuration: 8 }),
+      presetRing({ renderMode: 'circumference', shape: 'diamond', width: 4, height: 58, splitCount: 8, evenSpacing: true, arcRadius: 49, arcAngle: 45, arcOrientation: 'radial', fillEnabled: true, fillOpacity: 100, lineWidth: 1 }, { enabled: true, rotateEnabled: true, rotateDuration: 8 }),
+      presetRing({ shape: 'circle', width: 80, height: 80, lineStyle: 'double', lineWidth: 2 }, { enabled: true, rotateEnabled: true, rotateDuration: 8 }, { width: 20, height: 20 }),
+      presetRing({ shape: 'point', width: 42, height: 42, lineWidth: 5, fillEnabled: true, fillOpacity: 14 }, { enabled: true, rotateEnabled: true, rotateDuration: 8 }, { shape: 'circle', width: 20, height: 20 }),
+      presetRing({ shape: 'sparkle', width: 53, height: 53, lineStyle: 'double', doubleLineGap: 50, lineWidth: 2, fillEnabled: true, fillOpacity: 9 }, { enabled: true, rotateEnabled: true, rotateDuration: 8 }, { shape: 'circle', width: 20, height: 20 })
+    ]
+  },
+  {
+    key: 'magic-hexagram',
+    label: '魔法陣・六芒',
+    color: '#ffcf78',
+    rings: [
+      presetRing({ shape: 'circle', width: 126, height: 126, lineStyle: 'double', doubleLineGap: 28, lineWidth: 2 }, { enabled: true, rotateEnabled: true, rotateDuration: 16 }),
+      presetRing({ shape: 'circle', width: 104, height: 104, lineStyle: 'dashed', lineWidth: 2, opacity: 78 }, { enabled: true, rotateEnabled: true, rotateDuration: 10, direction: 'reverse' }),
+      presetRing({ shape: 'hexagram', width: 88, height: 88, lineWidth: 3 }, { enabled: true, rotateEnabled: true, rotateDuration: 14 }),
+      presetRing({ shape: 'hexagram', width: 57, height: 57, angle: 30, lineStyle: 'dashed', lineWidth: 2 }, { enabled: true, rotateEnabled: true, rotateDuration: 9, direction: 'reverse' }),
+      presetRing({ renderMode: 'circumference', shape: 'diamond', width: 9, height: 15, splitCount: 6, evenSpacing: true, arcRadius: 47, arcOrientation: 'radial', fillEnabled: true, fillOpacity: 80 }, { enabled: true, rotateEnabled: true, rotateDuration: 12 }),
+      presetRing({ shape: 'circle', width: 38, height: 38, lineStyle: 'double', doubleLineGap: 36, lineWidth: 2 }),
+      presetRing({ shape: 'sparkle', width: 18, height: 18, fillEnabled: true, fillOpacity: 85 }, { enabled: true, glowEnabled: true, glowMin: 4, glowMax: 16, glowDuration: 2 })
+    ]
+  },
+  {
+    key: 'magic-octagram',
+    label: '魔法陣・八方',
+    color: '#d59cff',
+    rings: [
+      presetRing({ renderMode: 'segmentedArc', shape: 'circle', width: 132, height: 132, splitCount: 8, splitGap: 4, lineWidth: 2 }, { enabled: true, rotateEnabled: true, rotateDuration: 18 }),
+      presetRing({ shape: 'circle', width: 112, height: 112, lineStyle: 'double', doubleLineGap: 34, lineWidth: 2 }, { enabled: true, rotateEnabled: true, rotateDuration: 12, direction: 'reverse' }),
+      presetRing({ shape: 'octagram', width: 88, height: 88, lineWidth: 2 }, { enabled: true, rotateEnabled: true, rotateDuration: 14 }),
+      presetRing({ shape: 'octagram', width: 58, height: 58, angle: 22, lineStyle: 'dashed', lineWidth: 2 }, { enabled: true, rotateEnabled: true, rotateDuration: 8, direction: 'reverse' }),
+      presetRing({ renderMode: 'circumference', shape: 'tick', width: 11, height: 28, splitCount: 8, evenSpacing: true, arcRadius: 52, arcOrientation: 'radial', lineWidth: 2 }, { enabled: true, rotateEnabled: true, rotateDuration: 11 }),
+      presetRing({ renderMode: 'circumference', shape: 'point', width: 8, height: 8, splitCount: 8, evenSpacing: true, arcRadius: 38, fillEnabled: true, fillOpacity: 100 }, { enabled: true, rotateEnabled: true, rotateDuration: 8, direction: 'reverse' }),
+      presetRing({ shape: 'cross', width: 38, height: 38, lineWidth: 2 }),
+      presetRing({ shape: 'circle', width: 10, height: 10, fillEnabled: true, fillOpacity: 100 })
+    ]
+  },
+  {
     key: 'angel',
     label: '天使',
     color: '#dff7ff',
@@ -1627,6 +1702,16 @@ const materializePresetRing = (preset, index, color) => {
   }
 }
 const applyExistingMarkerPreset = preset => {
+  if (preset.settings) {
+    draft.value = createDraftFromSettings(cloneMarkerSettings(preset.settings))
+    selectedRingId.value = draft.value.rings[0].id
+    appliedPresetKey.value = preset.key
+    pendingOverallShape.value = null
+    previewPosition.value = { x: 50, y: 50 }
+    selectEditingState('idle')
+    selectRing(selectedRingId.value)
+    return
+  }
   const overall = makeOverallAppearance({
     shape: 'circle',
     size: preset.size || 100,
@@ -2306,6 +2391,7 @@ p { margin-top: 8px; color: rgba(200, 240, 250, 0.72); font-size: 20px; line-hei
 }
 .library-toolbar button { padding: 9px 10px; }
 .library-toolbar button:disabled { cursor: not-allowed; opacity: 0.4; }
+.marker-settings-file-input { display: none; }
 .library-export-note {
   margin: 10px 0 0;
   color: rgba(201, 248, 255, 0.72);
