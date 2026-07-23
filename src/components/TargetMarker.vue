@@ -199,11 +199,11 @@
               <path
                 v-for="eraser in getCustomErasersAbove(ring)"
                 :key="eraser.id"
-                :d="getCustomShapePath(eraser.shape || customMarkerAppearance.shape, eraser)"
+                :d="getCustomShapeMaskPath(eraser.shape || customMarkerAppearance.shape, eraser)"
                 :transform="getCustomLayerEraseTransform(eraser)"
-                :fill-rule="eraser.shape === 'sharpMoon' ? 'evenodd' : null"
+                :fill-rule="getCustomShapeFillRule(eraser.shape || customMarkerAppearance.shape)"
                 fill="black"
-                stroke="black"
+                :stroke="(eraser.shape || customMarkerAppearance.shape) === 'gear' ? 'none' : 'black'"
               />
             </mask>
           </defs>
@@ -303,19 +303,19 @@
                 <mask :id="getCustomCutoutMaskId(ring, segmentIndex)">
                   <rect width="100" height="100" fill="white" />
                   <path
-                    :d="getCustomShapePath(ring.shape || customMarkerAppearance.shape, ring)"
+                    :d="getCustomShapeMaskPath(ring.shape || customMarkerAppearance.shape, ring)"
                     :transform="getCustomCutoutTransform(ring)"
-                    :fill-rule="ring.shape === 'sharpMoon' ? 'evenodd' : null"
+                    :fill-rule="getCustomShapeFillRule(ring.shape || customMarkerAppearance.shape)"
                     fill="black"
-                    stroke="black"
+                    :stroke="(ring.shape || customMarkerAppearance.shape) === 'gear' ? 'none' : 'black'"
                   />
                 </mask>
               </defs>
               <path
                 class="custom-segment-fill"
-                :d="getCustomShapePath(ring.shape || customMarkerAppearance.shape, ring)"
+                :d="getCustomShapeFillPath(ring.shape || customMarkerAppearance.shape, ring)"
                 :mask="ring.cutoutEnabled ? `url(#${getCustomCutoutMaskId(ring, segmentIndex)})` : null"
-                :fill-rule="ring.shape === 'sharpMoon' ? 'evenodd' : null"
+                :fill-rule="getCustomShapeFillRule(ring.shape || customMarkerAppearance.shape)"
               />
               <path
                 class="custom-segment-line"
@@ -558,7 +558,7 @@ const getCustomTextItems = ring => {
   }
   return splitCustomText(ring.textContent)
 }
-const CUSTOM_RENDER_MODES = new Set(['continuous', 'segmentedArc', 'circumference', 'free', 'center', 'connection', 'textRing'])
+const CUSTOM_RENDER_MODES = new Set(['continuous', 'segmentedArc', 'circumference', 'connection', 'textRing'])
 const getCustomRenderMode = ring => CUSTOM_RENDER_MODES.has(ring.renderMode)
   ? ring.renderMode
   : ring.layout === 'arc' ? 'circumference' : 'continuous'
@@ -709,12 +709,172 @@ const getCustomSharpMoonPath = ring => {
     'Z'
   ].join(' ')
 }
+const getCustomGearPath = (ring, mode = 'spoked') => {
+  const toothCount = Math.min(32, Math.max(6, Math.round(Number(ring?.gearTeeth) || 12)))
+  const spokeCount = mode === 'matched' ? toothCount : Math.max(3, Math.round(toothCount / 3))
+  const innerSize = Math.min(90, Math.max(5, Number(ring?.gearInnerSize) || 38))
+  const outerRadius = 47
+  const rootRadius = 38
+  const innerRadius = rootRadius * innerSize / 100
+  const toothStep = Math.PI * 2 / toothCount
+  const points = []
+
+  for (let index = 0; index < toothCount; index += 1) {
+    const centerAngle = -Math.PI / 2 + index * toothStep
+    const toothPoints = [
+      [centerAngle - toothStep * 0.5, rootRadius],
+      [centerAngle - toothStep * 0.32, rootRadius],
+      [centerAngle - toothStep * 0.22, outerRadius],
+      [centerAngle + toothStep * 0.22, outerRadius],
+      [centerAngle + toothStep * 0.32, rootRadius]
+    ]
+    toothPoints.forEach(([angle, radius]) => {
+      points.push([
+        50 + Math.cos(angle) * radius,
+        50 + Math.sin(angle) * radius
+      ])
+    })
+  }
+
+  const path = [
+    points.map(([x, y], index) => `${index === 0 ? 'M' : 'L'} ${x.toFixed(2)} ${y.toFixed(2)}`).join(' '),
+    'Z'
+  ]
+
+  if (mode === 'fill') return path.join(' ')
+  if (mode === 'bodyFill') {
+    const innerFillRadius = rootRadius * 0.63
+    path.push(
+      `M 50 ${(50 - innerFillRadius).toFixed(2)}`,
+      `A ${innerFillRadius.toFixed(2)} ${innerFillRadius.toFixed(2)} 0 1 0 50 ${(50 + innerFillRadius).toFixed(2)}`,
+      `A ${innerFillRadius.toFixed(2)} ${innerFillRadius.toFixed(2)} 0 1 0 50 ${(50 - innerFillRadius).toFixed(2)}`,
+      'Z'
+    )
+    return path.join(' ')
+  }
+
+  if (mode === 'outline') {
+    path.push(getCustomGearSupportPath(ring))
+    return path.join(' ')
+  }
+
+  path.push(
+    `M 50 ${(50 - rootRadius).toFixed(2)}`,
+    `A ${rootRadius} ${rootRadius} 0 1 0 50 ${(50 + rootRadius).toFixed(2)}`,
+    `A ${rootRadius} ${rootRadius} 0 1 0 50 ${(50 - rootRadius).toFixed(2)}`,
+    'Z'
+  )
+
+  // 支柱は線ではなく閉じた棒として、中央ハブから歯車の内周へ接続する。
+  const spokeHalfWidth = Math.min(3.2, Math.max(1.2, 10 / Math.sqrt(Math.max(1, spokeCount))))
+  for (let index = 0; index < spokeCount; index += 1) {
+    const angle = -Math.PI / 2 + Math.PI * 2 * index / spokeCount
+    const perpendicular = angle + Math.PI / 2
+    const startRadius = innerRadius
+    const startX = 50 + Math.cos(angle) * startRadius
+    const startY = 50 + Math.sin(angle) * startRadius
+    const endX = 50 + Math.cos(angle) * rootRadius
+    const endY = 50 + Math.sin(angle) * rootRadius
+    const offsetX = Math.cos(perpendicular) * spokeHalfWidth
+    const offsetY = Math.sin(perpendicular) * spokeHalfWidth
+    path.push(
+      `M ${(startX + offsetX).toFixed(2)} ${(startY + offsetY).toFixed(2)}`,
+      `L ${(endX + offsetX).toFixed(2)} ${(endY + offsetY).toFixed(2)}`,
+      `L ${(endX - offsetX).toFixed(2)} ${(endY - offsetY).toFixed(2)}`,
+      `L ${(startX - offsetX).toFixed(2)} ${(startY - offsetY).toFixed(2)}`,
+      'Z'
+    )
+  }
+  path.push(
+    `M 50 ${(50 - innerRadius).toFixed(2)}`,
+    `A ${innerRadius.toFixed(2)} ${innerRadius.toFixed(2)} 0 1 1 50 ${(50 + innerRadius).toFixed(2)}`,
+    `A ${innerRadius.toFixed(2)} ${innerRadius.toFixed(2)} 0 1 1 50 ${(50 - innerRadius).toFixed(2)}`,
+    'Z'
+  )
+  return path.join(' ')
+}
+const getCustomGearSupportPath = ring => {
+  if (ring?.gearSupportsEnabled !== true) return ''
+
+  const rootRadius = 38
+  const supportCount = Math.min(16, Math.max(1, Math.round(Number(ring.gearSupportCount) || 3)))
+  const supportOffset = Math.min(30, Math.max(-30, Number(ring.gearSupportOffset) || 0)) / 100 * rootRadius
+  const supportThickness = rootRadius * 0.36
+  const supportCenterRadius = rootRadius * 0.62 + supportOffset
+  const supportOuterRadius = Math.min(rootRadius - 2, supportCenterRadius + supportThickness / 2)
+  const supportInnerRadius = Math.max(4, supportCenterRadius - supportThickness / 2)
+  const supportStep = Math.PI * 2 / supportCount
+  const supportSpan = supportStep * 0.62
+  const path = []
+
+  for (let index = 0; index < supportCount; index += 1) {
+    const centerAngle = -Math.PI / 2 + supportStep * index
+    const startAngle = centerAngle - supportSpan / 2
+    const endAngle = centerAngle + supportSpan / 2
+    const outerStartX = 50 + Math.cos(startAngle) * supportOuterRadius
+    const outerStartY = 50 + Math.sin(startAngle) * supportOuterRadius
+    const outerEndX = 50 + Math.cos(endAngle) * supportOuterRadius
+    const outerEndY = 50 + Math.sin(endAngle) * supportOuterRadius
+    const innerEndX = 50 + Math.cos(endAngle) * supportInnerRadius
+    const innerEndY = 50 + Math.sin(endAngle) * supportInnerRadius
+    const innerStartX = 50 + Math.cos(startAngle) * supportInnerRadius
+    const innerStartY = 50 + Math.sin(startAngle) * supportInnerRadius
+    path.push(
+      `M ${outerStartX.toFixed(2)} ${outerStartY.toFixed(2)}`,
+      `A ${supportOuterRadius.toFixed(2)} ${supportOuterRadius.toFixed(2)} 0 0 1 ${outerEndX.toFixed(2)} ${outerEndY.toFixed(2)}`,
+      `L ${innerEndX.toFixed(2)} ${innerEndY.toFixed(2)}`,
+      `A ${supportInnerRadius.toFixed(2)} ${supportInnerRadius.toFixed(2)} 0 0 0 ${innerStartX.toFixed(2)} ${innerStartY.toFixed(2)}`,
+      'Z'
+    )
+  }
+  return path.join(' ')
+}
+const getCustomSegmentedRingPath = ring => {
+  const count = Math.min(8, Math.max(2, Math.round(Number(ring?.splitCount) || 2)))
+  const segmentLength = 100 / count
+  const requestedGap = Math.max(0, Number(ring?.splitGap) || 0)
+  const gap = Math.min(segmentLength * 0.8, requestedGap)
+  const step = Math.PI * 2 / count
+  const gapAngle = step * gap / segmentLength
+  const visibleAngle = step - gapAngle
+  const radius = 46
+  const path = []
+
+  for (let index = 0; index < count; index += 1) {
+    const startAngle = -Math.PI / 2 + step * index + gapAngle / 2
+    const endAngle = startAngle + visibleAngle
+    const startX = 50 + Math.cos(startAngle) * radius
+    const startY = 50 + Math.sin(startAngle) * radius
+    const endX = 50 + Math.cos(endAngle) * radius
+    const endY = 50 + Math.sin(endAngle) * radius
+    path.push(
+      `M ${startX.toFixed(2)} ${startY.toFixed(2)}`,
+      `A ${radius} ${radius} 0 ${visibleAngle > Math.PI ? 1 : 0} 1 ${endX.toFixed(2)} ${endY.toFixed(2)}`
+    )
+  }
+  return path.join(' ')
+}
 const getCustomShapePath = (shape, ring) => {
   if (shape === 'magitechWave') return getCustomMagitechWavePath(ring)
   if (shape === 'moon') return getCustomMoonPath(ring)
   if (shape === 'sharpMoon') return getCustomSharpMoonPath(ring)
+  if (shape === 'segmentedRing') return getCustomSegmentedRingPath(ring)
+  if (shape === 'polygon') return getCustomConnectionPath(ring)
+  if (shape === 'gear') return getCustomGearPath(ring, 'outline')
+  if (shape === 'gear2') return getCustomGearPath(ring, 'matched')
   return CUSTOM_SHAPE_PATHS[shape] || CUSTOM_SHAPE_PATHS.circle
 }
+const getCustomShapeFillPath = (shape, ring) => {
+  if (shape === 'gear') {
+    return ring.gearFillBody !== false ? getCustomShapeMaskPath(shape, ring) : ''
+  }
+  return getCustomShapePath(shape, ring)
+}
+const getCustomShapeMaskPath = (shape, ring) => {
+  if (shape === 'gear') return [getCustomGearPath(ring, 'fill'), getCustomGearSupportPath(ring)].join(' ')
+  return getCustomShapePath(shape, ring)
+}
+const getCustomShapeFillRule = shape => ['sharpMoon', 'gear'].includes(shape) ? 'evenodd' : null
 const getCustomCutoutMaskId = (ring, segmentIndex) => `${markerSvgIdPrefix}-custom-cutout-${String(ring.id).replace(/[^a-zA-Z0-9_-]/g, '-')}-${segmentIndex}`
 const getCustomCutoutTransform = ring => {
   const scale = Math.min(0.9, Math.max(0.1, (Number(ring.cutoutSize) || 62) / 100))
@@ -943,7 +1103,9 @@ const getCustomSegmentedArcStyle = ring => {
   }
 }
 const getCustomConnectionPath = ring => {
-  const count = Math.max(2, getCustomRingSplitCount(ring))
+  const count = ring.shape === 'polygon'
+    ? Math.min(24, Math.max(3, Math.round(Number(ring.polygonSides) || 3)))
+    : Math.max(2, getCustomRingSplitCount(ring))
   const radius = Math.min(45, Math.max(2, Number(ring.arcRadius) || 45) / 70 * 45)
   const startAngle = (Number(ring.arcAngle) || 270) * Math.PI / 180
   const points = Array.from({ length: count }, (_, index) => {
@@ -1015,7 +1177,7 @@ const isCustomLayerAbove = (candidate, target) => {
 const getCustomErasersAbove = ring => customRings.value.filter(candidate => (
   candidate.eraseBelow === true
   && candidate.visible !== false
-  && ['continuous', 'free', 'center'].includes(getCustomRenderMode(candidate))
+  && getCustomRenderMode(candidate) === 'continuous'
   && isCustomLayerAbove(candidate, ring)
 ))
 const getCustomLayerEraseTransform = ring => {
@@ -3450,6 +3612,21 @@ onBeforeUnmount(() => {
 .custom-shape-tick .custom-segment-fill,
 .custom-shape-wave .custom-segment-fill,
 .custom-shape-magitechWave .custom-segment-fill { fill: none; }
+.custom-shape-segmentedRing .custom-segment-fill { fill: none; }
+.custom-shape-gear .custom-segment-line {
+  fill: none !important;
+  stroke: var(--custom-segment-color) !important;
+}
+.custom-shape-gear2 .custom-segment-fill {
+  fill: none;
+}
+.custom-shape-gear2 .custom-segment-line {
+  fill: var(--custom-segment-color);
+  stroke: none;
+}
+.custom-shape-gear2 .custom-segment-line-inner {
+  display: none;
+}
 .custom-segment-line {
   fill: none;
   stroke: var(--custom-segment-color);

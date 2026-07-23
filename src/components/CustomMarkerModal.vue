@@ -1,24 +1,42 @@
 <template>
   <Teleport to="body">
     <BaseHudModal
-      :frame-width="previewFullscreen ? 'calc(100vw - 4px)' : '720px'"
-      :frame-height="previewFullscreen ? 'calc(100vh - 4px)' : '1280px'"
+      :frame-width="previewFullscreen ? 'calc(100vw - 4px)' : mobileLayout ? 'calc(100vw - 8px)' : '720px'"
+      :frame-height="previewFullscreen ? 'calc(100vh - 4px)' : mobileLayout ? 'calc(100dvh - 8px)' : '1280px'"
       frame-max-height="none"
       frame-overflow="hidden"
-      :frame-scale="previewFullscreen ? 1 : modalScale"
+      :frame-scale="previewFullscreen || mobileLayout ? 1 : modalScale"
       :close-on-overlay="false"
       @close="$emit('close')"
     >
-      <div class="custom-marker-modal" :class="{ 'preview-fullscreen-mode': previewFullscreen }">
+      <div
+        class="custom-marker-modal"
+        :class="{ 'preview-fullscreen-mode': previewFullscreen, 'mobile-layout': mobileLayout }"
+        :style="mobileLayoutStyle"
+        @click.capture="openRangeEditorFromEvent"
+      >
       <header class="modal-header">
         <div>
-          <div class="modal-kicker">TARGET MARKER</div>
-          <h2>作成</h2>
+          <strong v-if="mobileLayout" class="mobile-marker-name">{{ currentMarkerName }}</strong>
+          <div v-else class="modal-kicker">TARGET MARKER</div>
+          <h2 v-if="!mobileLayout">作成</h2>
         </div>
-        <button type="button" class="close-button" @click="$emit('close')">閉じる</button>
+        <div class="header-actions">
+          <button
+            v-if="mobileLayout"
+            type="button"
+            class="mobile-menu-trigger"
+            aria-label="その他の設定を開く"
+            @click="mobileMenuOpen = true"
+          >
+            …
+          </button>
+          <button v-if="!mobileLayout" type="button" class="close-button" @click="$emit('close')">閉じる</button>
+        </div>
       </header>
 
       <section
+        ref="markerPreviewRef"
         class="marker-preview"
         :style="previewBackgroundStyle"
         @click="movePreviewToPointer"
@@ -45,6 +63,17 @@
           />
         </div>
       </section>
+
+      <button
+        v-if="mobileLayout"
+        type="button"
+        class="mobile-layer-trigger"
+        aria-label="レイヤー一覧を開く"
+        @click="openMobileLayerDrawer"
+      >
+        <span>LAYER</span>
+        <strong>{{ selectedRingIndex + 1 }}/{{ draft.rings.length }}</strong>
+      </button>
 
       <section class="editor-layout">
         <div class="editor-state-tabs" aria-label="編集する状態">
@@ -83,9 +112,20 @@
             </button>
           </div>
         </div>
-        <nav class="setting-list" aria-label="ターゲットマーカー設定">
+        <nav class="setting-list desktop-setting-list" aria-label="ターゲットマーカー設定">
           <button
             v-for="section in sections"
+            :key="section.key"
+            type="button"
+            :class="{ active: activeSection === section.key }"
+            @click="activeSection = section.key"
+          >
+            {{ section.label }}
+          </button>
+        </nav>
+        <nav v-if="mobileLayout" class="mobile-setting-list" aria-label="レイヤー設定">
+          <button
+            v-for="section in layerSections"
             :key="section.key"
             type="button"
             :class="{ active: activeSection === section.key }"
@@ -158,6 +198,12 @@
           <template v-else-if="activeSection === 'display'">
             <h3>表示設定</h3>
             <p>上部プレビューの背景と確認方法を設定します。</p>
+            <label class="setting-row">
+              <span>プレビュー表示比率</span>
+              <input v-model.number="draft.behavior.previewRatio" type="range" min="25" max="60" step="5" />
+              <output>{{ draft.behavior.previewRatio }}%</output>
+            </label>
+            <div class="setting-note">初期値40%で、プレビューと設定画面がおよそ4:6になります。</div>
             <label class="setting-row">
               <span>背景色</span>
               <input v-model="draft.behavior.previewBackgroundColor" type="color" />
@@ -337,7 +383,7 @@
           <template v-else-if="activeSection === 'rings'">
             <div class="section-heading">
               <div>
-                <h3>レイヤー</h3>
+                <h3>{{ mobileLayout ? getRingName(selectedRing, selectedRingIndex) : 'レイヤー' }}</h3>
                 <p>追加したレイヤーごとに表示設定を変更できます。</p>
               </div>
               <div class="ring-action-buttons">
@@ -346,21 +392,16 @@
                 <button type="button" :disabled="selectedRingIndex <= 0" @click="moveSelectedRing(-1)">前へ</button>
               </div>
             </div>
-            <div class="render-mode-grid">
-              <button
-                v-for="mode in renderModes"
-                :key="mode.key"
-                type="button"
-                :class="{ active: selectedRingAppearance.renderMode === mode.key }"
-                @click="setRenderMode(mode.key)"
-              >
-                {{ mode.label }}
-              </button>
-            </div>
+            <label class="setting-row select-row render-mode-select">
+              <span>配置方式</span>
+              <select :value="selectedRingAppearance.renderMode" @change="setRenderMode($event.target.value)">
+                <option v-for="mode in renderModes" :key="mode.key" :value="mode.key">{{ mode.label }}</option>
+              </select>
+            </label>
             <p class="render-mode-description">
               {{ renderModes.find(mode => mode.key === selectedRingAppearance.renderMode)?.description }}
             </p>
-            <label v-if="!['segmentedArc', 'connection'].includes(selectedRingAppearance.renderMode)" class="setting-row select-row">
+            <label v-if="selectedRingAppearance.renderMode !== 'segmentedArc'" class="setting-row select-row">
               <span>形状</span>
               <select v-model="selectedRingAppearance.shape" @change="onRingShapeChange">
                 <option v-for="shape in shapes" :key="shape.key" :value="shape.key">{{ shape.label }}</option>
@@ -376,6 +417,35 @@
               <input v-model.number="selectedRingAppearance.innerCircleAngle" type="range" min="0" max="359" step="1" />
               <output>{{ selectedRingAppearance.innerCircleAngle }}°</output>
             </label>
+            <template v-if="['gear', 'gear2'].includes(selectedRingAppearance.shape)">
+              <label class="setting-row">
+                <span>歯の数</span>
+                <input v-model.number="selectedRingAppearance.gearTeeth" type="range" min="6" max="32" step="1" />
+                <output>
+                  {{ selectedRingAppearance.gearTeeth }}
+                  <template v-if="selectedRingAppearance.shape === 'gear2'">（支柱 {{ getGearSpokeCount(selectedRingAppearance.gearTeeth, selectedRingAppearance.shape) }}）</template>
+                </output>
+              </label>
+              <label v-if="selectedRingAppearance.shape === 'gear'" class="toggle-row">
+                <input v-model="selectedRingAppearance.gearSupportsEnabled" type="checkbox" />
+                <span>支柱を追加</span>
+              </label>
+              <label v-if="selectedRingAppearance.shape === 'gear' && selectedRingAppearance.gearSupportsEnabled" class="setting-row">
+                <span>支柱数</span>
+                <input v-model.number="selectedRingAppearance.gearSupportCount" type="range" min="1" max="16" step="1" />
+                <output>{{ selectedRingAppearance.gearSupportCount }}</output>
+              </label>
+              <label v-if="selectedRingAppearance.shape === 'gear' && selectedRingAppearance.gearSupportsEnabled" class="setting-row">
+                <span>支柱の内外位置</span>
+                <input v-model.number="selectedRingAppearance.gearSupportOffset" type="range" min="-30" max="30" step="1" />
+                <output>{{ selectedRingAppearance.gearSupportOffset }}%</output>
+              </label>
+              <label v-if="selectedRingAppearance.shape === 'gear2'" class="setting-row">
+                <span>中央の円の大きさ</span>
+                <input v-model.number="selectedRingAppearance.gearInnerSize" type="range" min="5" max="90" step="1" />
+                <output>{{ selectedRingAppearance.gearInnerSize }}%</output>
+              </label>
+            </template>
             <label class="setting-row">
               <span>色</span>
               <input v-model="selectedRingAppearance.color" type="color" />
@@ -391,10 +461,15 @@
               <input v-model.number="selectedRingAppearance.height" type="range" min="1" max="140" step="1" />
               <output>{{ selectedRingAppearance.height }}%</output>
             </label>
-            <label v-if="['segmentedArc', 'circumference', 'connection'].includes(selectedRingAppearance.renderMode) || (selectedRingAppearance.renderMode === 'textRing' && selectedRingAppearance.textMode === 'labels')" class="setting-row">
+            <label v-if="selectedRingAppearance.shape === 'segmentedRing' || selectedRingAppearance.renderMode === 'circumference' || (selectedRingAppearance.renderMode === 'textRing' && selectedRingAppearance.textMode === 'labels')" class="setting-row">
               <span>分割数</span>
-              <input v-model.number="selectedRingAppearance.splitCount" type="range" :min="selectedRingAppearance.renderMode === 'connection' ? 2 : 1" :max="selectedRingAppearance.renderMode === 'textRing' ? 64 : 8" step="1" />
+              <input v-model.number="selectedRingAppearance.splitCount" type="range" :min="selectedRingAppearance.shape === 'segmentedRing' ? 2 : 1" :max="selectedRingAppearance.renderMode === 'textRing' ? 64 : 8" step="1" />
               <output>{{ selectedRingAppearance.splitCount }}</output>
+            </label>
+            <label v-if="selectedRingAppearance.shape === 'polygon'" class="setting-row">
+              <span>頂点数</span>
+              <input v-model.number="selectedRingAppearance.polygonSides" type="range" min="3" max="24" step="1" />
+              <output>{{ selectedRingAppearance.polygonSides }}</output>
             </label>
             <template v-if="selectedRingAppearance.renderMode === 'textRing'">
               <label class="setting-row select-row">
@@ -509,7 +584,7 @@
               <input v-model="selectedRingAppearance.evenSpacing" type="checkbox" />
               <span>分割片を均等配置する</span>
             </label>
-            <label v-if="selectedRingAppearance.renderMode === 'segmentedArc'" class="setting-row">
+            <label v-if="selectedRingAppearance.shape === 'segmentedRing'" class="setting-row">
               <span>円弧間隔</span>
               <input v-model.number="selectedRingAppearance.splitGap" type="range" min="0" max="20" step="1" />
               <output>{{ selectedRingAppearance.splitGap }}</output>
@@ -519,13 +594,13 @@
               <input v-model.number="selectedRingAppearance.arcSpread" type="range" min="0" max="360" step="1" />
               <output>{{ selectedRingAppearance.arcSpread }}°</output>
             </label>
-            <label v-if="['circumference', 'connection'].includes(selectedRingAppearance.renderMode)" class="setting-row">
-              <span>{{ selectedRingAppearance.renderMode === 'connection' ? '接続半径' : '軌道半径' }}</span>
+            <label v-if="selectedRingAppearance.renderMode === 'circumference' || selectedRingAppearance.shape === 'polygon'" class="setting-row">
+              <span>{{ selectedRingAppearance.shape === 'polygon' ? '頂点半径' : '軌道半径' }}</span>
               <input v-model.number="selectedRingAppearance.arcRadius" type="range" min="0" max="70" step="1" />
               <output>{{ selectedRingAppearance.arcRadius }}%</output>
             </label>
-            <label v-if="['circumference', 'connection'].includes(selectedRingAppearance.renderMode)" class="setting-row">
-              <span>配置角度</span>
+            <label v-if="selectedRingAppearance.renderMode === 'circumference' || selectedRingAppearance.shape === 'polygon'" class="setting-row">
+              <span>{{ selectedRingAppearance.shape === 'polygon' ? '開始角度' : '配置角度' }}</span>
               <input v-model.number="selectedRingAppearance.arcAngle" type="range" min="0" max="359" step="1" />
               <output>{{ selectedRingAppearance.arcAngle }}°</output>
             </label>
@@ -537,7 +612,7 @@
                 <option value="fixed">角度固定</option>
               </select>
             </label>
-            <label v-if="!['connection', 'textRing'].includes(selectedRingAppearance.renderMode)" class="setting-row">
+            <label v-if="selectedRingAppearance.renderMode !== 'textRing'" class="setting-row">
               <span>角度</span>
               <input v-model.number="selectedRingAppearance.angle" type="range" min="0" max="359" step="1" />
               <output>{{ selectedRingAppearance.angle }}°</output>
@@ -565,7 +640,7 @@
                 <output>{{ selectedRingAppearance.waveSpeed.toFixed(1) }}x</output>
               </label>
             </template>
-            <label v-if="selectedRingAppearance.renderMode === 'connection'" class="toggle-row">
+            <label v-if="selectedRingAppearance.shape === 'polygon'" class="toggle-row">
               <input v-model="selectedRingAppearance.connectionClosed" type="checkbox" />
               <span>最後の点を最初の点へ接続</span>
             </label>
@@ -620,6 +695,12 @@
               <span>内側を塗る</span>
             </label>
             <template v-if="!['segmentedArc', 'textRing'].includes(selectedRingAppearance.renderMode) && selectedRingAppearance.fillEnabled">
+              <template v-if="selectedRingAppearance.shape === 'gear'">
+                <label class="toggle-row">
+                  <input v-model="selectedRingAppearance.gearFillBody" type="checkbox" />
+                  <span>支柱以外を塗る</span>
+                </label>
+              </template>
               <label class="setting-row">
                 <span>塗り色</span>
                 <input v-model="selectedRingAppearance.fillColor" type="color" />
@@ -862,6 +943,164 @@
         <button type="button" class="secondary-button" @click="reset">初期化</button>
         <button type="button" class="save-button" @click="save">決定</button>
       </footer>
+
+      <div
+        v-if="mobileLayerDrawerOpen"
+        class="mobile-panel-overlay mobile-layer-overlay"
+        :style="{ top: `${mobileDrawerTop}px` }"
+        @click.self="mobileLayerDrawerOpen = false"
+      >
+        <aside class="mobile-layer-drawer" aria-label="レイヤー一覧">
+          <header>
+            <div>
+              <span>EDIT LAYER</span>
+              <strong>{{ draft.rings.length }} / {{ MAX_RINGS }}</strong>
+            </div>
+            <div class="mobile-layer-header-actions">
+              <button
+                type="button"
+                :disabled="draft.rings.length >= MAX_RINGS"
+                aria-label="選択中のレイヤーの下へ追加"
+                @click="addRing"
+              >
+                ＋
+              </button>
+            </div>
+          </header>
+          <div class="mobile-layer-list">
+            <div
+              v-for="(ring, index) in draft.rings"
+              :key="ring.id"
+              class="mobile-layer-item"
+              :class="{
+                active: selectedRingId === ring.id,
+                hidden: getRingAppearance(ring).visible === false,
+                dragging: draggingRingId === ring.id,
+                'drag-over': dragOverRingId === ring.id
+              }"
+              :data-ring-id="ring.id"
+            >
+              <button
+                type="button"
+                class="mobile-layer-select"
+                @pointerdown="startLayerLongPress($event, ring.id)"
+                @pointermove="cancelLayerLongPressOnMove"
+                @pointerup="endLayerLongPress"
+                @pointercancel="cancelLayerLongPress"
+                @contextmenu.prevent="openLayerContextMenu(ring.id)"
+                @click="handleLayerSelect(ring.id)"
+              >
+                <span class="ring-tab-color" :style="{ backgroundColor: getRingAppearance(ring).color }"></span>
+                <span>{{ index + 1 }}. {{ getRingName(ring, index) }}</span>
+                <small v-if="getRingAppearance(ring).visible === false">非表示</small>
+              </button>
+              <button
+                type="button"
+                class="mobile-layer-drag-handle"
+                aria-label="ドラッグしてレイヤーを並べ替え"
+                @pointerdown.prevent="startLayerDrag($event, ring.id)"
+                @pointermove.prevent="moveLayerDrag"
+                @pointerup.prevent="endLayerDrag"
+                @pointercancel.prevent="endLayerDrag"
+              >
+                ≡
+              </button>
+            </div>
+          </div>
+          <div v-if="layerContextRingId" class="mobile-layer-context-backdrop" @click.self="closeLayerContextMenu">
+            <section class="mobile-layer-context-menu">
+              <strong>{{ contextLayerName }}</strong>
+              <button type="button" :disabled="draft.rings.length >= MAX_RINGS" @click="duplicateContextLayer">複製</button>
+              <button type="button" class="danger-button" :disabled="draft.rings.length <= 1" @click="removeContextLayer">削除</button>
+              <button type="button" @click="closeLayerContextMenu">キャンセル</button>
+            </section>
+          </div>
+        </aside>
+      </div>
+
+      <div
+        v-if="mobileMenuOpen"
+        class="mobile-panel-overlay mobile-menu-overlay"
+        @click.self="mobileMenuOpen = false"
+      >
+        <aside class="mobile-overflow-menu" aria-label="その他の設定">
+          <header>
+            <strong>MENU</strong>
+            <button type="button" aria-label="メニューを閉じる" @click="mobileMenuOpen = false">×</button>
+          </header>
+          <button
+            v-for="section in menuSections"
+            :key="section.key"
+            type="button"
+            :class="{ active: activeSection === section.key }"
+            @click="openMobileSection(section.key)"
+          >
+            <span>{{ section.label }}</span>
+            <small>{{ section.description }}</small>
+          </button>
+          <button type="button" @click="openFullscreenFromMenu">
+            <span>全画面プレビュー</span>
+            <small>設定UIを隠してマーカーだけ確認</small>
+          </button>
+          <button type="button" @click="copyFromMobileMenu">
+            <span>状態間コピー</span>
+            <small>{{ editingState === 'idle' ? '停止時の設定を移動時へコピー' : '移動時の設定を停止時へコピー' }}</small>
+          </button>
+          <button type="button" class="danger-button" @click="resetFromMobileMenu">
+            <span>初期化</span>
+            <small>作成中の設定を初期状態へ戻す</small>
+          </button>
+          <button type="button" @click="save">
+            <span>閉じる</span>
+            <small>現在の設定を反映して作成画面を閉じる</small>
+          </button>
+        </aside>
+      </div>
+
+      <div
+        v-if="rangeEditorOpen"
+        class="range-editor-backdrop"
+        @click.self="closeRangeEditor"
+      >
+        <section class="range-editor-sheet" role="dialog" aria-modal="true" :aria-label="`${rangeEditorLabel}の数値調整`">
+          <header>
+            <div>
+              <span>数値調整</span>
+              <strong>{{ rangeEditorLabel }}</strong>
+            </div>
+            <button type="button" @click="closeRangeEditor">閉じる</button>
+          </header>
+          <div class="range-editor-stepper">
+            <button type="button" aria-label="値を下げる" @click="adjustRangeEditor(-1)">－</button>
+            <label>
+              <input
+                :value="rangeEditorValue"
+                type="number"
+                inputmode="decimal"
+                :min="rangeEditorMin"
+                :max="rangeEditorMax"
+                :step="rangeEditorStep"
+                @input="setRangeEditorValue($event.target.value)"
+              />
+              <span>{{ rangeEditorUnit }}</span>
+            </label>
+            <button type="button" aria-label="値を上げる" @click="adjustRangeEditor(1)">＋</button>
+          </div>
+          <input
+            class="range-editor-slider"
+            :value="rangeEditorValue"
+            type="range"
+            :min="rangeEditorMin"
+            :max="rangeEditorMax"
+            :step="rangeEditorStep"
+            @input="setRangeEditorValue($event.target.value)"
+          />
+          <div class="range-editor-limits">
+            <span>{{ rangeEditorMin }}</span>
+            <span>{{ rangeEditorMax }}</span>
+          </div>
+        </section>
+      </div>
       </div>
     </BaseHudModal>
   </Teleport>
@@ -923,6 +1162,7 @@ const makeRingAppearance = overrides => ({
   width: 100,
   height: 100,
   splitCount: 1,
+  polygonSides: 3,
   splitGap: 0,
   equalizeSegments: false,
   evenSpacing: false,
@@ -949,6 +1189,12 @@ const makeRingAppearance = overrides => ({
   cutoutSize: 62,
   moonPhase: 78,
   innerCircleAngle: 0,
+  gearTeeth: 12,
+  gearInnerSize: 38,
+  gearSupportsEnabled: false,
+  gearSupportCount: 3,
+  gearSupportOffset: 0,
+  gearFillBody: true,
   eraseBelow: false,
   useSegmentColors: false,
   segmentColors: Array(TEXT_ITEM_LIMIT).fill('#8fefff'),
@@ -999,6 +1245,7 @@ const DEFAULT_SETTINGS = {
   behavior: {
     previewBackgroundColor: '#071722',
     previewGradientEnabled: true,
+    previewRatio: 40,
     followCursor: false,
     cursorFollowDuration: 80,
     cursorFollowSpeed: 90
@@ -1036,6 +1283,14 @@ const MAX_RINGS = 24
 const MODAL_BASE_WIDTH = 720
 const MODAL_BASE_HEIGHT = 1280
 const modalScale = ref(1)
+const mobileLayout = ref(false)
+const mobileLayerDrawerOpen = ref(false)
+const mobileMenuOpen = ref(false)
+const mobileDrawerTop = ref(302)
+const markerPreviewRef = ref(null)
+const layerContextRingId = ref(null)
+const draggingRingId = ref(null)
+const dragOverRingId = ref(null)
 const previewMoving = ref(false)
 const previewPosition = ref({ x: 50, y: 50 })
 const editingState = ref('idle')
@@ -1043,14 +1298,86 @@ const highlightedRingId = ref(null)
 const pendingOverallShape = ref(null)
 const previewCursorFollowActive = ref(false)
 const previewFullscreen = ref(false)
+const rangeEditorOpen = ref(false)
+const rangeEditorLabel = ref('')
+const rangeEditorValue = ref(0)
+const rangeEditorMin = ref(0)
+const rangeEditorMax = ref(100)
+const rangeEditorStep = ref(1)
+const rangeEditorUnit = ref('')
+let rangeEditorTarget = null
 let previewMoveTimer = null
 let previewMoveToken = 0
 let ringHighlightTimer = null
 let previewCursorAnimationFrame = null
 let previewCursorLastFrame = null
 let previewCursorTarget = { x: 50, y: 50 }
+let layerLongPressTimer = null
+let layerLongPressStart = null
+let layerLongPressTriggered = false
+const getRangePrecision = step => {
+  const stepText = String(step)
+  return stepText.includes('.') ? stepText.split('.')[1].length : 0
+}
+const normalizeRangeValue = value => {
+  const numericValue = Number(value)
+  if (!Number.isFinite(numericValue)) return null
+  const min = Number(rangeEditorMin.value)
+  const max = Number(rangeEditorMax.value)
+  const step = Math.max(Number.EPSILON, Number(rangeEditorStep.value) || 1)
+  const clamped = Math.min(max, Math.max(min, numericValue))
+  const stepped = min + Math.round((clamped - min) / step) * step
+  return Number(stepped.toFixed(getRangePrecision(step)))
+}
+const setRangeEditorValue = value => {
+  if (!rangeEditorTarget?.isConnected) {
+    closeRangeEditor()
+    return
+  }
+  const normalized = normalizeRangeValue(value)
+  if (normalized == null) return
+  rangeEditorValue.value = normalized
+  rangeEditorTarget.value = String(normalized)
+  rangeEditorTarget.dispatchEvent(new Event('input', { bubbles: true }))
+  rangeEditorTarget.dispatchEvent(new Event('change', { bubbles: true }))
+}
+const adjustRangeEditor = direction => {
+  setRangeEditorValue(Number(rangeEditorValue.value) + Number(direction) * Number(rangeEditorStep.value))
+}
+const closeRangeEditor = () => {
+  rangeEditorOpen.value = false
+  rangeEditorTarget = null
+}
+const openRangeEditorFromEvent = event => {
+  if (!mobileLayout.value || rangeEditorOpen.value) return
+  const output = event.target?.closest?.('.setting-row output')
+  if (!output) return
+  const row = output.closest('.setting-row')
+  const input = row?.querySelector('input[type="range"]')
+  if (!input || input.disabled) return
+
+  event.preventDefault()
+  const outputText = output.textContent?.trim() || ''
+  const unitMatch = outputText.match(/[-+]?\d+(?:\.\d+)?\s*(.*)$/)
+  rangeEditorTarget = input
+  rangeEditorLabel.value = row.querySelector(':scope > span')?.textContent?.trim() || '数値'
+  rangeEditorMin.value = Number(input.min || 0)
+  rangeEditorMax.value = Number(input.max || 100)
+  rangeEditorStep.value = Number(input.step || 1)
+  rangeEditorValue.value = Number(input.value)
+  rangeEditorUnit.value = unitMatch?.[1] || ''
+  rangeEditorOpen.value = true
+}
 const updateModalScale = () => {
   if (typeof window === 'undefined') return
+  mobileLayout.value = window.innerWidth <= 768
+    || (window.matchMedia('(pointer: coarse)').matches && window.innerWidth <= 1024)
+  if (!mobileLayout.value) {
+    if (rangeEditorOpen.value) closeRangeEditor()
+    mobileLayerDrawerOpen.value = false
+    mobileMenuOpen.value = false
+    layerContextRingId.value = null
+  }
   const viewportScale = Math.min(
     (window.innerWidth - 24) / MODAL_BASE_WIDTH,
     (window.innerHeight - 24) / MODAL_BASE_HEIGHT
@@ -1081,6 +1408,7 @@ onBeforeUnmount(() => {
   if (previewMoveTimer) clearTimeout(previewMoveTimer)
   if (ringHighlightTimer) clearTimeout(ringHighlightTimer)
   if (previewCursorAnimationFrame != null) cancelAnimationFrame(previewCursorAnimationFrame)
+  if (layerLongPressTimer) clearTimeout(layerLongPressTimer)
 })
 
 const makeRing = index => ({
@@ -1122,12 +1450,21 @@ const normalizeRingMotion = ring => {
 }
 const normalizeRingAppearance = ring => {
   const legacySize = Number(ring.size) || 100
+  const legacyRenderMode = ['center', 'free'].includes(ring.renderMode)
+    ? 'continuous'
+    : ring.renderMode === 'segmentedArc' || ring.renderMode === 'connection'
+      ? 'continuous'
+      : ring.renderMode || (ring.layout === 'arc' ? 'circumference' : 'continuous')
+  const legacyShape = ring.renderMode === 'segmentedArc'
+    ? 'segmentedRing'
+    : ring.renderMode === 'connection' ? 'polygon' : ring.shape || 'circle'
   const legacy = makeRingAppearance({
-    renderMode: ring.renderMode || (ring.layout === 'arc' ? 'circumference' : 'continuous'),
+    renderMode: legacyRenderMode,
     color: ring.color || '#8fefff',
     width: Number(ring.width) || legacySize,
     height: Number(ring.height) || legacySize,
     splitCount: Number(ring.splitCount) || 1,
+    polygonSides: Math.min(24, Math.max(3, Number(ring.polygonSides) || (ring.renderMode === 'connection' ? Number(ring.splitCount) || 3 : 3))),
     splitGap: Number(ring.splitGap) || 0,
     equalizeSegments: ring.equalizeSegments === true,
     evenSpacing: ring.evenSpacing === true,
@@ -1142,7 +1479,7 @@ const normalizeRingAppearance = ring => {
     offsetY: Number(ring.offsetY) || 0,
     opacity: Number(ring.opacity) || 100,
     lineWidth: Number(ring.lineWidth) || 2,
-    shape: ring.shape || 'circle',
+    shape: legacyShape,
     lineStyle: ring.lineStyle || 'solid',
     dashLength: Math.min(40, Math.max(1, Number(ring.dashLength) || 14)),
     dashGap: Math.min(40, Math.max(1, Number(ring.dashGap) || 8)),
@@ -1161,6 +1498,12 @@ const normalizeRingAppearance = ring => {
     cutoutSize: Math.min(90, Math.max(10, Number(ring.cutoutSize) || 62)),
     moonPhase: Math.min(100, Math.max(0, Number.isFinite(Number(ring.moonPhase)) ? Number(ring.moonPhase) : 78)),
     innerCircleAngle: Math.min(359, Math.max(0, Number(ring.innerCircleAngle) || 0)),
+    gearTeeth: Math.min(32, Math.max(6, Number(ring.gearTeeth) || 12)),
+    gearInnerSize: Math.min(90, Math.max(5, Number(ring.gearInnerSize) || 38)),
+    gearSupportsEnabled: ring.gearSupportsEnabled === true,
+    gearSupportCount: Math.min(16, Math.max(1, Number(ring.gearSupportCount) || 3)),
+    gearSupportOffset: Math.min(30, Math.max(-30, Number(ring.gearSupportOffset) || 0)),
+    gearFillBody: ring.gearFillBody !== false,
     eraseBelow: ring.eraseBelow === true,
     useSegmentColors: ring.useSegmentColors === true,
     segmentColors: Array.from({ length: TEXT_ITEM_LIMIT }, (_, index) => ring.segmentColors?.[index] || ring.color || '#8fefff'),
@@ -1268,6 +1611,13 @@ const createDraftFromSettings = settings => {
   }
 }
 const draft = ref(createDraftFromSettings(props.settings))
+const mobileLayoutStyle = computed(() => {
+  const previewRatio = Math.min(60, Math.max(25, Number(draft.value.behavior.previewRatio) || 40))
+  return {
+    '--mobile-preview-ratio': `${previewRatio}fr`,
+    '--mobile-settings-ratio': `${100 - previewRatio}fr`
+  }
+})
 const MARKER_LIBRARY_STORAGE_KEY = 'battle-custom-target-marker-library-v1'
 const MAX_SAVED_MARKERS = 20
 const readMarkerLibrary = () => {
@@ -1290,7 +1640,9 @@ const markerLibrarySizeLabel = computed(() => {
   return `${(bytes / 1024 / 1024).toFixed(2)} MB`
 })
 const selectedSavedMarkerId = ref(null)
-const libraryName = ref('')
+const libraryName = ref(typeof draft.value.name === 'string' ? draft.value.name.slice(0, 32) : '')
+const loadedMarkerName = ref(libraryName.value)
+const currentMarkerName = computed(() => loadedMarkerName.value.trim() || '新規マーカー')
 const libraryNotice = ref('')
 const markerSettingsFileInput = ref(null)
 const activeSection = ref('rings')
@@ -1299,14 +1651,19 @@ const appliedPresetKey = ref(null)
 const selectedRingId = ref(draft.value.rings[0].id)
 const selectedRingIndex = computed(() => Math.max(0, draft.value.rings.findIndex(ring => ring.id === selectedRingId.value)))
 const selectedRing = computed(() => draft.value.rings[selectedRingIndex.value])
+const contextLayerName = computed(() => {
+  const index = draft.value.rings.findIndex(ring => ring.id === layerContextRingId.value)
+  if (index < 0) return ''
+  return getRingName(draft.value.rings[index], index)
+})
 const selectedOverall = computed(() => draft.value.appearance[editingState.value])
 const selectedWholeMotion = computed(() => draft.value.wholeMotion[editingState.value])
 const selectedRingAppearance = computed(() => selectedRing.value.appearance[editingState.value])
-const CUTOUT_SHAPES = new Set(['circle', 'point', 'square', 'triangle', 'diamond', 'star', 'hexagram', 'octagram', 'sparkle', 'arrow', 'arrowhead', 'sector', 'moon', 'sharpMoon', 'heart', 'sun'])
+const CUTOUT_SHAPES = new Set(['circle', 'point', 'square', 'triangle', 'diamond', 'star', 'hexagram', 'octagram', 'sparkle', 'arrow', 'arrowhead', 'sector', 'moon', 'sharpMoon', 'gear', 'gear2', 'heart', 'sun'])
 const selectedRingSupportsCutout = computed(() => CUTOUT_SHAPES.has(selectedRingAppearance.value.shape))
 const selectedRingSupportsLayerErase = computed(() => (
   CUTOUT_SHAPES.has(selectedRingAppearance.value.shape)
-  && ['continuous', 'free', 'center'].includes(selectedRingAppearance.value.renderMode)
+  && selectedRingAppearance.value.renderMode === 'continuous'
 ))
 const selectedMotion = computed(() => selectedRing.value.motion[editingState.value])
 const selectedRingItemCount = computed(() => {
@@ -1349,6 +1706,92 @@ const selectRing = ringId => {
       ringHighlightTimer = null
     }, 850)
   }, 20)
+}
+const selectRingFromDrawer = ringId => {
+  selectRing(ringId)
+  activeSection.value = 'rings'
+}
+const openMobileLayerDrawer = () => {
+  const previewBottom = markerPreviewRef.value?.getBoundingClientRect?.().bottom
+  mobileDrawerTop.value = Number.isFinite(previewBottom) ? Math.round(previewBottom) : 302
+  mobileLayerDrawerOpen.value = true
+}
+const openLayerContextMenu = ringId => {
+  layerContextRingId.value = ringId
+}
+const closeLayerContextMenu = () => {
+  layerContextRingId.value = null
+}
+const cancelLayerLongPress = () => {
+  if (layerLongPressTimer) clearTimeout(layerLongPressTimer)
+  layerLongPressTimer = null
+  layerLongPressStart = null
+}
+const startLayerLongPress = (event, ringId) => {
+  if (event.pointerType === 'mouse' && event.button !== 0) return
+  cancelLayerLongPress()
+  layerLongPressTriggered = false
+  layerLongPressStart = { x: event.clientX, y: event.clientY }
+  layerLongPressTimer = setTimeout(() => {
+    layerLongPressTriggered = true
+    openLayerContextMenu(ringId)
+    layerLongPressTimer = null
+  }, 550)
+}
+const cancelLayerLongPressOnMove = event => {
+  if (!layerLongPressStart) return
+  if (Math.hypot(event.clientX - layerLongPressStart.x, event.clientY - layerLongPressStart.y) > 8) {
+    cancelLayerLongPress()
+  }
+}
+const endLayerLongPress = () => {
+  cancelLayerLongPress()
+}
+const handleLayerSelect = ringId => {
+  if (layerLongPressTriggered) {
+    layerLongPressTriggered = false
+    return
+  }
+  selectRingFromDrawer(ringId)
+}
+const startLayerDrag = (event, ringId) => {
+  cancelLayerLongPress()
+  draggingRingId.value = ringId
+  dragOverRingId.value = ringId
+  event.currentTarget.setPointerCapture?.(event.pointerId)
+}
+const moveLayerDrag = event => {
+  if (!draggingRingId.value) return
+  const target = document.elementFromPoint(event.clientX, event.clientY)?.closest?.('.mobile-layer-item')
+  const targetId = target?.dataset?.ringId
+  if (!targetId || targetId === draggingRingId.value) return
+  const from = draft.value.rings.findIndex(ring => ring.id === draggingRingId.value)
+  const to = draft.value.rings.findIndex(ring => ring.id === targetId)
+  if (from < 0 || to < 0) return
+  const [ring] = draft.value.rings.splice(from, 1)
+  draft.value.rings.splice(to, 0, ring)
+  dragOverRingId.value = targetId
+}
+const endLayerDrag = event => {
+  event.currentTarget.releasePointerCapture?.(event.pointerId)
+  draggingRingId.value = null
+  dragOverRingId.value = null
+}
+const openMobileSection = section => {
+  activeSection.value = section
+  mobileMenuOpen.value = false
+}
+const openFullscreenFromMenu = () => {
+  mobileMenuOpen.value = false
+  enterPreviewFullscreen()
+}
+const copyFromMobileMenu = () => {
+  copyEditingStateToOther()
+  mobileMenuOpen.value = false
+}
+const resetFromMobileMenu = () => {
+  reset()
+  mobileMenuOpen.value = false
 }
 const cloneMarkerSettings = settings => JSON.parse(JSON.stringify(settings))
 const persistMarkerLibrary = () => {
@@ -1396,6 +1839,7 @@ const importMarkerSettings = async event => {
     draft.value = createDraftFromSettings(cloneMarkerSettings(settings))
     selectedSavedMarkerId.value = null
     libraryName.value = typeof parsed?.name === 'string' ? parsed.name.slice(0, 32) : file.name.replace(/\.json$/i, '').slice(0, 32)
+    loadedMarkerName.value = libraryName.value
     selectedRingId.value = draft.value.rings[0].id
     appliedPresetKey.value = null
     pendingOverallShape.value = null
@@ -1426,6 +1870,7 @@ const saveNewMarker = () => {
   savedMarkers.value.unshift(marker)
   selectedSavedMarkerId.value = marker.id
   libraryName.value = marker.name
+  loadedMarkerName.value = marker.name
   if (persistMarkerLibrary()) libraryNotice.value = `「${marker.name}」を保存しました。`
 }
 const overwriteSavedMarker = () => {
@@ -1441,12 +1886,14 @@ const overwriteSavedMarker = () => {
   savedMarkers.value.splice(index, 1)
   savedMarkers.value.unshift(updated)
   libraryName.value = updated.name
+  loadedMarkerName.value = updated.name
   if (persistMarkerLibrary()) libraryNotice.value = `「${updated.name}」を上書きしました。`
 }
 const loadSavedMarker = marker => {
   draft.value = createDraftFromSettings(cloneMarkerSettings(marker.settings))
   selectedSavedMarkerId.value = marker.id
   libraryName.value = marker.name
+  loadedMarkerName.value = marker.name
   selectedRingId.value = draft.value.rings[0].id
   appliedPresetKey.value = null
   pendingOverallShape.value = null
@@ -1477,15 +1924,30 @@ const setOverallShape = shape => {
   })
 }
 const onRingShapeChange = () => {
-  if (selectedRingAppearance.value.shape !== 'point') return
-  selectedRingAppearance.value.fillEnabled = true
-  selectedRingAppearance.value.fillOpacity = 100
+  const appearance = selectedRingAppearance.value
+  if (appearance.shape === 'point') {
+    appearance.fillEnabled = true
+    appearance.fillOpacity = 100
+  }
+  if (appearance.shape === 'segmentedRing') {
+    appearance.splitCount = Math.max(2, Number(appearance.splitCount) || 2)
+    appearance.equalizeSegments = false
+    appearance.evenSpacing = false
+  }
+  if (appearance.shape === 'polygon') {
+    appearance.polygonSides = Math.max(3, Number(appearance.polygonSides) || 3)
+    appearance.connectionClosed = true
+  }
 }
 const requestOverallShapeChange = shape => {
   if (shape === selectedOverall.value.shape) return
   pendingOverallShape.value = shape
 }
 const shapeLabel = shapeKey => shapes.find(shape => shape.key === shapeKey)?.label || shapeKey
+const getGearSpokeCount = (teeth, shape) => {
+  const toothCount = Math.min(32, Math.max(6, Number(teeth) || 12))
+  return shape === 'gear2' ? toothCount : 0
+}
 const moonPhaseLabel = value => {
   const phase = Number(value) || 0
   if (phase <= 8) return '満月'
@@ -1501,18 +1963,17 @@ const confirmOverallShapeChange = () => {
 const setRenderMode = mode => {
   const appearance = selectedRingAppearance.value
   appearance.renderMode = mode
+  // 表示形式ごとに座標系と分割の意味が異なるため、前の形式の状態を持ち込まない。
+  appearance.offsetX = 0
+  appearance.offsetY = 0
+  appearance.equalizeSegments = false
+  appearance.evenSpacing = false
+  appearance.splitGap = 0
+
   if (mode === 'circumference') {
     appearance.layout = 'arc'
     appearance.evenSpacing = true
     appearance.splitCount = Math.max(3, Number(appearance.splitCount) || 1)
-  } else if (mode === 'segmentedArc') {
-    appearance.layout = 'straight'
-    appearance.splitCount = Math.max(2, Number(appearance.splitCount) || 1)
-    appearance.splitGap = Math.max(2, Number(appearance.splitGap) || 0)
-  } else if (mode === 'connection') {
-    appearance.layout = 'straight'
-    appearance.splitCount = Math.max(3, Number(appearance.splitCount) || 1)
-    appearance.connectionClosed = true
   } else if (mode === 'textRing') {
     appearance.layout = 'straight'
     appearance.textMode = appearance.textMode === 'labels' ? 'labels' : 'string'
@@ -1522,12 +1983,12 @@ const setRenderMode = mode => {
     appearance.textSpacing ||= 100
     appearance.textArcSpread ||= 360
     appearance.textSize ||= 14
+  } else if (mode === 'continuous') {
+    // 円周配置の分割・軌道設定を残すと、単体へ戻したSVGが縮小・偏位する。
+    appearance.layout = 'straight'
+    appearance.splitCount = 1
   } else {
     appearance.layout = 'straight'
-  }
-  if (mode === 'center') {
-    appearance.offsetX = 0
-    appearance.offsetY = 0
   }
 }
 const previewTargetStyle = computed(() => {
@@ -1557,6 +2018,13 @@ const sections = [
   { key: 'existing', label: '既存' },
   { key: 'library', label: '保存' }
 ]
+const layerSections = sections.filter(section => ['rings', 'motion'].includes(section.key))
+const menuSections = [
+  { key: 'overall', label: '全体設定', description: '全レイヤーの大きさと動き' },
+  { key: 'display', label: '表示設定', description: '背景とプレビュー操作' },
+  { key: 'existing', label: '既存マーカー', description: '既存設定から作成' },
+  { key: 'library', label: '保存・JSON', description: '保存、読込、JSON入出力' }
+]
 
 const shapes = [
   { key: 'circle', label: '円' },
@@ -1569,6 +2037,8 @@ const shapes = [
   { key: 'corner', label: 'L字枠' },
   { key: 'cornerFrame', label: '四隅枠' },
   { key: 'arc', label: '円弧' },
+  { key: 'segmentedRing', label: '分割リング' },
+  { key: 'polygon', label: '多角形' },
   { key: 'tick', label: '目盛り' },
   { key: 'star', label: '星' },
   { key: 'hexagram', label: '六芒星' },
@@ -1576,6 +2046,8 @@ const shapes = [
   { key: 'sparkle', label: '十字星' },
   { key: 'moon', label: '月' },
   { key: 'sharpMoon', label: '二重円（可変）' },
+  { key: 'gear', label: '歯車' },
+  { key: 'gear2', label: '歯車2' },
   { key: 'heart', label: 'ハート' },
   { key: 'sun', label: '太陽' },
   { key: 'arrow', label: '矢印 ⇒' },
@@ -1587,11 +2059,7 @@ const shapes = [
 
 const renderModes = [
   { key: 'continuous', label: '単体形状', description: '中心を基準に、円や模様などの形を1つ描画します。' },
-  { key: 'segmentedArc', label: '分割円弧', description: '1本の円周を指定数の円弧へ均等に分割します。' },
   { key: 'circumference', label: '円周配置', description: '同じ部品を中心点の周囲へ均等に配置します。' },
-  { key: 'free', label: '自由配置', description: '中心からXY位置をずらして部品を配置します。' },
-  { key: 'center', label: '中央部品', description: '中心位置へ照準点や十字などを固定します。' },
-  { key: 'connection', label: '接続線', description: '中心周囲の頂点を線で結びます。' },
   { key: 'textRing', label: '円周文字', description: '文字列または個別ラベルを中心の周囲へ最大64個まで配置します。' }
 ]
 
@@ -1626,10 +2094,10 @@ const existingMarkerPresets = [
     label: 'G1.5',
     color: '#e58a36',
     rings: [
-      presetRing({ renderMode: 'segmentedArc', shape: 'circle', width: 92, height: 92, splitCount: 8, splitGap: 7, lineWidth: 1, opacity: 62 }),
+      presetRing({ shape: 'segmentedRing', width: 92, height: 92, splitCount: 8, splitGap: 7, lineWidth: 1, opacity: 62 }),
       presetRing({ shape: 'circle', width: 64, height: 64, lineStyle: 'dashed', lineWidth: 2 }, { enabled: true, rotateEnabled: true, rotateDuration: 6 }),
-      presetRing({ renderMode: 'center', shape: 'cornerFrame', width: 100, height: 100, lineWidth: 3 }),
-      presetRing({ renderMode: 'center', shape: 'cross', width: 58, height: 58, lineWidth: 2 }),
+      presetRing({ shape: 'cornerFrame', width: 100, height: 100, lineWidth: 3 }),
+      presetRing({ shape: 'cross', width: 58, height: 58, lineWidth: 2 }),
       presetRing({ shape: 'circle', width: 28, height: 28, lineWidth: 1, opacity: 82 })
     ]
   },
@@ -1640,7 +2108,7 @@ const existingMarkerPresets = [
     rings: [
       presetRing({ shape: 'circle', width: 96, height: 96, lineWidth: 2 }),
       presetRing({ shape: 'tick', width: 72, height: 16, splitCount: 8, equalizeSegments: true, layout: 'arc', evenSpacing: true, arcRadius: 51, arcOrientation: 'radial', lineWidth: 2 }, { enabled: true, rotateEnabled: true, rotateDuration: 9 }),
-      presetRing({ renderMode: 'center', shape: 'cornerFrame', width: 100, height: 100, lineWidth: 2 }),
+      presetRing({ shape: 'cornerFrame', width: 100, height: 100, lineWidth: 2 }),
       presetRing({ shape: 'cross', width: 70, height: 70, lineWidth: 2 })
     ]
   },
@@ -1685,7 +2153,7 @@ const existingMarkerPresets = [
     rings: [
       presetRing({ shape: 'magitechWave', width: 96, height: 96, lineWidth: 2, opacity: 90 }, { enabled: true, rotateEnabled: true, rotateDuration: 10 }),
       presetRing({ shape: 'circle', width: 72, height: 72, lineWidth: 1, opacity: 78 }),
-      presetRing({ renderMode: 'connection', width: 100, height: 100, splitCount: 3, arcRadius: 47, lineWidth: 2, opacity: 72 }, { enabled: true, rotateEnabled: true, rotateDuration: 9, glowEnabled: true, glowMin: 3, glowMax: 9 }),
+      presetRing({ shape: 'polygon', width: 100, height: 100, splitCount: 3, arcRadius: 47, lineWidth: 2, opacity: 72 }, { enabled: true, rotateEnabled: true, rotateDuration: 9, glowEnabled: true, glowMin: 3, glowMax: 9 }),
       presetRing({ shape: 'circle', width: 56, height: 18, splitCount: 3, equalizeSegments: true, layout: 'arc', evenSpacing: true, arcRadius: 47, arcOrientation: 'fixed', fillEnabled: true, fillOpacity: 75, useSegmentColors: true, segmentColors: nodeColors }, { enabled: true, rotateEnabled: true, rotateDuration: 9, glowEnabled: true, glowMin: 5, glowMax: 12 }),
       presetRing({ shape: 'sparkle', width: 12, height: 12, fillEnabled: true, fillOpacity: 70 })
     ]
@@ -1698,7 +2166,7 @@ const existingMarkerPresets = [
     rings: [
       presetRing({ shape: 'magitechWave', width: 124, height: 114, lineWidth: 2, waveAmplitude: 1.5, waveCount: 24, waveRandomness: 81 }, { enabled: true, rotateEnabled: true, rotateDuration: 8 }, { waveAmplitude: 4, waveCount: 12, waveRandomness: 55, waveSpeed: 1 }, { rotateDuration: 1 }),
       presetRing({ shape: 'circle', width: 85, height: 85, lineWidth: 1, opacity: 78 }, staticMotion(), {}, { enabled: true, rotateEnabled: true, rotateDuration: 1 }),
-      presetRing({ renderMode: 'connection', width: 117, height: 117, splitCount: 5, arcRadius: 49, lineWidth: 2, opacity: 76 }, { enabled: true, rotateEnabled: true, rotateDuration: 8, glowEnabled: true, glowMin: 4, glowMax: 11 }, { width: 100, height: 100 }, { rotateDuration: 1 }),
+      presetRing({ shape: 'polygon', width: 117, height: 117, splitCount: 5, arcRadius: 49, lineWidth: 2, opacity: 76 }, { enabled: true, rotateEnabled: true, rotateDuration: 8, glowEnabled: true, glowMin: 4, glowMax: 11 }, { width: 100, height: 100 }, { rotateDuration: 1 }),
       presetRing({ shape: 'circle', width: 64, height: 18, splitCount: 5, equalizeSegments: true, layout: 'arc', evenSpacing: true, arcRadius: 49, arcOrientation: 'fixed', fillEnabled: true, fillOpacity: 80, useSegmentColors: true, segmentColors: g45NodeColors, lineStyle: 'double', doubleLineGap: 40, glow: 14, glowColor: '#c28cf8', blendMode: 'screen' }, { enabled: true, rotateEnabled: true, rotateDuration: 8 }, { lineStyle: 'solid', doubleLineGap: 18, glow: 8, glowColor: '#7064dc', blendMode: 'normal' }, { rotateDuration: 1 }),
       presetRing({ shape: 'arrowhead', width: 62, height: 15, splitCount: 4, equalizeSegments: true, layout: 'arc', evenSpacing: true, arcRadius: 70, arcOrientation: 'radial', fillEnabled: true, fillOpacity: 65 }, { enabled: true, rotateEnabled: false, rotateDuration: 12, direction: 'reverse' }, { angle: 178 }),
       presetRing({ shape: 'circle', width: 24, height: 12, lineWidth: 2, opacity: 55 }),
@@ -1725,9 +2193,9 @@ const existingMarkerPresets = [
     label: 'G5.5',
     color: '#9be7ff',
     rings: [
-      presetRing({ renderMode: 'segmentedArc', shape: 'circle', width: 92, height: 92, splitCount: 4, splitGap: 8, lineWidth: 4, opacity: 75 }, { enabled: true, rotateEnabled: true, rotateDuration: 12 }),
+      presetRing({ shape: 'segmentedRing', width: 92, height: 92, splitCount: 4, splitGap: 8, lineWidth: 4, opacity: 75 }, { enabled: true, rotateEnabled: true, rotateDuration: 12 }),
       presetRing({ shape: 'cross', width: 72, height: 72, angle: 45, lineStyle: 'dotted', lineWidth: 3, opacity: 42 }),
-      presetRing({ renderMode: 'center', shape: 'cornerFrame', width: 100, height: 100, lineWidth: 3, opacity: 78 }, { enabled: true, pulseEnabled: true, pulseDuration: 2.6, pulseAmount: 8 }),
+      presetRing({ shape: 'cornerFrame', width: 100, height: 100, lineWidth: 3, opacity: 78 }, { enabled: true, pulseEnabled: true, pulseDuration: 2.6, pulseAmount: 8 }),
       presetRing({ shape: 'circle', width: 74, height: 74, lineWidth: 1, opacity: 88 })
     ]
   },
@@ -1782,7 +2250,7 @@ const existingMarkerPresets = [
     label: '魔法陣・八方',
     color: '#d59cff',
     rings: [
-      presetRing({ renderMode: 'segmentedArc', shape: 'circle', width: 132, height: 132, splitCount: 8, splitGap: 4, lineWidth: 2 }, { enabled: true, rotateEnabled: true, rotateDuration: 18 }),
+      presetRing({ shape: 'segmentedRing', width: 132, height: 132, splitCount: 8, splitGap: 4, lineWidth: 2 }, { enabled: true, rotateEnabled: true, rotateDuration: 18 }),
       presetRing({ shape: 'circle', width: 112, height: 112, lineStyle: 'double', doubleLineGap: 34, lineWidth: 2 }, { enabled: true, rotateEnabled: true, rotateDuration: 12, direction: 'reverse' }),
       presetRing({ shape: 'octagram', width: 88, height: 88, lineWidth: 2 }, { enabled: true, rotateEnabled: true, rotateDuration: 14 }),
       presetRing({ shape: 'octagram', width: 58, height: 58, angle: 22, lineStyle: 'dashed', lineWidth: 2 }, { enabled: true, rotateEnabled: true, rotateDuration: 8, direction: 'reverse' }),
@@ -1822,7 +2290,7 @@ const existingMarkerPresets = [
     label: '戦術',
     color: '#93ffb9',
     rings: [
-      presetRing({ renderMode: 'center', shape: 'cornerFrame', width: 100, height: 100, lineWidth: 3 }),
+      presetRing({ shape: 'cornerFrame', width: 100, height: 100, lineWidth: 3 }),
       presetRing({ shape: 'tick', width: 62, height: 13, splitCount: 8, equalizeSegments: true, layout: 'arc', arcSpread: 145, arcAngle: 270, arcRadius: 36, arcOrientation: 'radial' }),
       presetRing({ shape: 'cross', width: 42, height: 42, lineWidth: 2 })
     ]
@@ -1846,7 +2314,7 @@ const existingMarkerPresets = [
       presetRing({ shape: 'circle', width: 86, height: 86, lineStyle: 'dashed' }),
       presetRing({ shape: 'circle', width: 47, height: 47, opacity: 72 }),
       presetRing({ shape: 'cross', width: 86, height: 86, lineWidth: 1, opacity: 42 }),
-      presetRing({ renderMode: 'free', shape: 'line', width: 39, height: 10, offsetX: 19, lineWidth: 2 }, { enabled: true, rotateEnabled: true, rotateDuration: 3.8 }),
+      presetRing({ shape: 'line', width: 39, height: 10, offsetX: 19, lineWidth: 2 }, { enabled: true, rotateEnabled: true, rotateDuration: 3.8 }),
       presetRing({ shape: 'circle', width: 7, height: 7, fillEnabled: true, fillOpacity: 100 })
     ]
   },
@@ -1869,16 +2337,18 @@ const addRing = () => {
   draft.value.rings.splice(selectedRingIndex.value + 1, 0, ring)
   selectRing(ring.id)
 }
-const duplicateSelectedRing = () => {
+const duplicateRingById = ringId => {
   if (draft.value.rings.length >= MAX_RINGS) return
-  const index = selectedRingIndex.value
+  const index = draft.value.rings.findIndex(ring => ring.id === ringId)
+  if (index < 0) return
   const ring = {
-    ...cloneRing(selectedRing.value),
+    ...cloneRing(draft.value.rings[index]),
     id: `ring-${Date.now()}-copy`
   }
   draft.value.rings.splice(index + 1, 0, ring)
   selectRing(ring.id)
 }
+const duplicateSelectedRing = () => duplicateRingById(selectedRingId.value)
 const moveSelectedRing = direction => {
   const from = selectedRingIndex.value
   const to = from + direction
@@ -1886,11 +2356,21 @@ const moveSelectedRing = direction => {
   const [ring] = draft.value.rings.splice(from, 1)
   draft.value.rings.splice(to, 0, ring)
 }
-const removeSelectedRing = () => {
+const removeRingById = ringId => {
   if (draft.value.rings.length <= 1) return
-  const index = selectedRingIndex.value
+  const index = draft.value.rings.findIndex(ring => ring.id === ringId)
+  if (index < 0) return
   draft.value.rings.splice(index, 1)
   selectedRingId.value = draft.value.rings[Math.max(0, index - 1)].id
+}
+const removeSelectedRing = () => removeRingById(selectedRingId.value)
+const duplicateContextLayer = () => {
+  duplicateRingById(layerContextRingId.value)
+  closeLayerContextMenu()
+}
+const removeContextLayer = () => {
+  removeRingById(layerContextRingId.value)
+  closeLayerContextMenu()
 }
 
 const materializePresetRing = (preset, index, color) => {
@@ -1926,6 +2406,8 @@ const applyExistingMarkerPreset = preset => {
     draft.value = createDraftFromSettings(cloneMarkerSettings(preset.settings))
     selectedRingId.value = draft.value.rings[0].id
     appliedPresetKey.value = preset.key
+    loadedMarkerName.value = preset.label
+    libraryName.value = preset.label
     pendingOverallShape.value = null
     previewPosition.value = { x: 50, y: 50 }
     selectEditingState('idle')
@@ -1954,6 +2436,8 @@ const applyExistingMarkerPreset = preset => {
     rings
   }
   appliedPresetKey.value = preset.key
+  loadedMarkerName.value = preset.label
+  libraryName.value = preset.label
   selectRing(rings[0].id)
   selectEditingState('idle')
 }
@@ -1978,6 +2462,8 @@ const reset = () => {
   pendingOverallShape.value = null
   previewCursorFollowActive.value = false
   previewFullscreen.value = false
+  loadedMarkerName.value = ''
+  libraryName.value = ''
   selectEditingState('idle')
 }
 
@@ -2126,7 +2612,10 @@ const movePreviewToCenter = () => {
 }
 
 const save = () => {
-  emit('save', { ...draft.value })
+  emit('save', {
+    ...draft.value,
+    name: loadedMarkerName.value.trim() || libraryName.value.trim() || '新規マーカー'
+  })
 }
 </script>
 
@@ -2208,6 +2697,17 @@ const save = () => {
   display: flex;
   align-items: center;
   justify-content: space-between;
+}
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.mobile-menu-trigger,
+.mobile-layer-trigger,
+.mobile-setting-list,
+.mobile-panel-overlay {
+  display: none;
 }
 
 .modal-kicker {
@@ -2385,6 +2885,7 @@ p { margin-top: 8px; color: rgba(200, 240, 250, 0.72); font-size: 20px; line-hei
   flex: 0 0 auto;
   align-items: center;
   gap: 6px;
+  min-width: 0;
   min-height: 32px;
 }
 
@@ -2498,6 +2999,9 @@ p { margin-top: 8px; color: rgba(200, 240, 250, 0.72); font-size: 20px; line-hei
   min-width: 0;
   padding: 16px;
   overflow-y: auto;
+}
+.render-mode-select {
+  margin-top: 0;
 }
 .render-mode-grid {
   display: grid;
@@ -2854,13 +3358,515 @@ p { margin-top: 8px; color: rgba(200, 240, 250, 0.72); font-size: 20px; line-hei
 .modal-footer { margin: 0; }
 .modal-footer > button { width: auto; flex: 1 1 0; }
 
+.range-editor-backdrop {
+  position: fixed;
+  z-index: 20;
+  inset: 0;
+  display: flex;
+  align-items: flex-end;
+  background: transparent;
+}
+.range-editor-sheet {
+  box-sizing: border-box;
+  width: 100%;
+  padding: 14px 14px calc(14px + env(safe-area-inset-bottom));
+  border: 1px solid #6de8ff;
+  border-bottom: 0;
+  border-radius: 14px 14px 0 0;
+  background:
+    linear-gradient(180deg, rgba(10, 42, 56, 0.98), rgba(3, 17, 26, 0.99)),
+    repeating-linear-gradient(90deg, transparent 0 11px, rgba(112, 231, 255, 0.04) 11px 12px);
+  box-shadow: 0 -12px 32px rgba(40, 197, 229, 0.3);
+}
+.range-editor-sheet header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.range-editor-sheet header div {
+  display: grid;
+  gap: 2px;
+}
+.range-editor-sheet header span {
+  color: #6de8ff;
+  font-size: 13px;
+  letter-spacing: 0.14em;
+}
+.range-editor-sheet header strong { font-size: 20px; }
+.range-editor-sheet header button {
+  min-width: 72px;
+  min-height: 44px;
+  border: 1px solid rgba(126, 224, 245, 0.52);
+  background: rgba(5, 23, 34, 0.9);
+  color: #d7f7ff;
+}
+.range-editor-stepper {
+  display: grid;
+  grid-template-columns: 56px minmax(0, 1fr) 56px;
+  gap: 10px;
+  margin-top: 14px;
+}
+.range-editor-stepper > button {
+  min-width: 56px;
+  min-height: 56px;
+  border: 1px solid #75eaff;
+  border-radius: 8px;
+  background: rgba(25, 92, 111, 0.88);
+  color: #fff;
+  font-size: 28px;
+  font-weight: 700;
+}
+.range-editor-stepper label {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  border: 1px solid rgba(126, 224, 245, 0.54);
+  border-radius: 8px;
+  background: rgba(1, 12, 20, 0.78);
+}
+.range-editor-stepper input {
+  box-sizing: border-box;
+  min-width: 0;
+  width: 100%;
+  height: 54px;
+  padding: 6px 10px;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: #fff5a6;
+  font-size: 24px;
+  font-weight: 700;
+  text-align: center;
+}
+.range-editor-stepper label span {
+  padding-right: 10px;
+  color: #9fefff;
+}
+.range-editor-slider {
+  width: 100%;
+  min-height: 48px;
+  margin-top: 12px;
+  touch-action: pan-y;
+}
+.range-editor-limits {
+  display: flex;
+  justify-content: space-between;
+  color: rgba(200, 240, 250, 0.68);
+  font-size: 14px;
+}
+
 @keyframes fullscreenHintFade {
   0%, 65% { opacity: 1; }
   100% { opacity: 0; }
 }
 
-@media (max-width: 640px) {
-  .editor-layout { grid-template-columns: 108px 1fr; }
-  .setting-row { grid-template-columns: 1fr; gap: 5px; }
+@media (max-width: 768px), (max-width: 1024px) and (pointer: coarse) {
+  .custom-marker-modal.mobile-layout {
+    position: relative;
+    grid-template-rows:
+      auto
+      minmax(180px, var(--mobile-preview-ratio, 40fr))
+      minmax(0, var(--mobile-settings-ratio, 60fr));
+    gap: 8px;
+    width: 100%;
+    height: 100%;
+    padding: 8px;
+    font-size: 16px;
+  }
+  .mobile-layout .modal-header {
+    min-width: 0;
+    min-height: 40px;
+  }
+  .mobile-layout .modal-header > div:first-child {
+    min-width: 0;
+  }
+  .mobile-marker-name {
+    display: block;
+    overflow: hidden;
+    color: #d7f7ff;
+    font-size: 17px;
+    letter-spacing: 0.04em;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .mobile-layout .modal-kicker { font-size: 12px; }
+  .mobile-layout h2 { font-size: 20px; }
+  .mobile-layout h3 { font-size: 18px; }
+  .mobile-layout p { font-size: 15px; }
+  .mobile-layout .close-button {
+    min-width: 72px;
+    min-height: 44px;
+  }
+  .mobile-layout .mobile-menu-trigger {
+    display: grid;
+    place-items: center;
+    width: 44px;
+    height: 40px;
+    padding: 0;
+    border: 1px solid rgba(126, 224, 245, 0.5);
+    background: rgba(8, 28, 40, 0.88);
+    color: #d7f7ff;
+    font-size: 28px;
+    line-height: 1;
+  }
+  .mobile-layout .marker-preview { height: auto; min-height: 0; }
+  .mobile-layout .preview-label { top: 6px; left: 8px; font-size: 12px; }
+  .mobile-layout .preview-controls {
+    top: 6px;
+    right: 6px;
+    gap: 4px;
+    font-size: 13px;
+  }
+  .mobile-layout .preview-controls > span { padding: 5px 7px; }
+  .mobile-layout .preview-controls button { min-height: 36px; padding: 5px 8px; }
+  .editor-layout {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto auto minmax(0, 1fr);
+  }
+  .editor-state-tabs {
+    grid-column: 1;
+    grid-row: 1;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 5px;
+    padding: 6px;
+  }
+  .editor-state-tabs > span { display: none; }
+  .editor-state-tabs button {
+    min-width: 0;
+    min-height: 44px;
+    padding: 6px 8px;
+  }
+  .editor-state-tabs .state-copy-button { display: none; }
+  .mobile-layout .ring-tabs,
+  .mobile-layout .desktop-setting-list {
+    display: none;
+  }
+  .mobile-setting-list {
+    display: grid;
+    grid-column: 1;
+    grid-row: 2;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 5px;
+    padding: 6px;
+    border-bottom: 1px solid rgba(116, 220, 245, 0.3);
+    background: rgba(3, 14, 24, 0.78);
+  }
+  .mobile-setting-list button {
+    min-height: 44px;
+    padding: 6px 4px;
+    border: 1px solid rgba(126, 224, 245, 0.32);
+    background: rgba(5, 23, 34, 0.78);
+    color: rgba(215, 247, 255, 0.76);
+    white-space: normal;
+  }
+  .mobile-setting-list button.active {
+    border-color: #c4faff;
+    background: rgba(34, 112, 134, 0.9);
+    color: #fff;
+    box-shadow: inset 0 3px 0 #8fefff;
+  }
+  .setting-content {
+    grid-column: 1;
+    grid-row: 3;
+    padding: 10px 10px 10px 46px;
+  }
+  .render-mode-grid { grid-template-columns: 1fr; }
+  .render-mode-grid button,
+  .choice-grid button,
+  .ring-action-buttons button,
+  .library-toolbar button,
+  .existing-preset-grid button {
+    min-height: 44px;
+  }
+  .section-heading {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+  .mobile-layout .section-heading p,
+  .mobile-layout .section-heading .ring-action-buttons {
+    display: none;
+  }
+  .ring-action-buttons {
+    width: 100%;
+    flex-wrap: wrap;
+  }
+  .ring-action-buttons button { flex: 1 1 30%; }
+  .setting-row {
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 6px 8px;
+    margin-top: 14px;
+  }
+  .setting-row > span:first-child { grid-column: 1 / -1; }
+  .setting-row input[type='range'] { grid-column: 1; }
+  .setting-row output {
+    display: grid;
+    grid-column: 2;
+    place-items: center;
+    min-width: 70px;
+    min-height: 44px;
+    padding: 0 8px;
+    border: 1px solid rgba(126, 224, 245, 0.46);
+    border-radius: 6px;
+    background: rgba(8, 35, 48, 0.88);
+    cursor: pointer;
+  }
+  .setting-row output:active {
+    background: rgba(34, 112, 134, 0.92);
+  }
+  .select-row select,
+  .text-setting-row input {
+    grid-column: 1 / -1;
+    min-height: 44px;
+  }
+  .setting-row input[type='range'] {
+    min-height: 40px;
+    touch-action: pan-y;
+  }
+  .setting-row input[type='range']::-webkit-slider-runnable-track {
+    height: 10px;
+    border-radius: 999px;
+  }
+  .setting-row input[type='range']::-webkit-slider-thumb {
+    width: 24px;
+    height: 24px;
+    margin-top: -7px;
+  }
+  .setting-row input[type='range']::-moz-range-track {
+    height: 10px;
+    border-radius: 999px;
+  }
+  .setting-row input[type='range']::-moz-range-thumb {
+    width: 24px;
+    height: 24px;
+  }
+  .toggle-row {
+    min-height: 44px;
+    margin-top: 12px;
+  }
+  .toggle-row input[type='checkbox'] {
+    width: 26px;
+    height: 26px;
+    flex-basis: 26px;
+  }
+  .mobile-layout .modal-footer { display: none; }
+
+  .mobile-layer-trigger {
+    position: absolute;
+    z-index: 9;
+    top: 61%;
+    left: -1px;
+    display: grid;
+    place-items: center;
+    width: 36px;
+    min-height: 74px;
+    padding: 6px 2px;
+    border: 1px solid #6de8ff;
+    border-left: 0;
+    border-radius: 0 8px 8px 0;
+    background: rgba(5, 32, 44, 0.97);
+    color: #9fefff;
+    box-shadow: 5px 0 16px rgba(34, 185, 219, 0.28);
+    translate: 0 -50%;
+  }
+  .mobile-layer-trigger span {
+    font-size: 10px;
+    letter-spacing: 0.08em;
+    writing-mode: vertical-rl;
+  }
+  .mobile-layer-trigger strong {
+    font-size: 13px;
+  }
+  .preview-fullscreen-mode > .mobile-layer-trigger {
+    display: none;
+  }
+
+  .mobile-panel-overlay {
+    position: fixed;
+    z-index: 30;
+    inset: 0;
+    display: flex;
+    background: rgba(0, 8, 13, 0.48);
+  }
+  .mobile-layer-overlay {
+    top: 302px;
+    justify-content: flex-start;
+  }
+  .mobile-menu-overlay { justify-content: flex-end; }
+  .mobile-layer-drawer,
+  .mobile-overflow-menu {
+    position: relative;
+    box-sizing: border-box;
+    display: flex;
+    width: min(82vw, 340px);
+    height: 100%;
+    flex-direction: column;
+    overflow: hidden;
+    border: 1px solid #6de8ff;
+    background:
+      linear-gradient(180deg, rgba(5, 31, 43, 0.99), rgba(2, 14, 23, 0.995)),
+      repeating-linear-gradient(0deg, transparent 0 9px, rgba(112, 231, 255, 0.035) 9px 10px);
+    box-shadow: 14px 0 32px rgba(34, 185, 219, 0.28);
+  }
+  .mobile-overflow-menu {
+    width: min(78vw, 320px);
+    box-shadow: -14px 0 32px rgba(34, 185, 219, 0.28);
+  }
+  .mobile-layer-drawer > header,
+  .mobile-overflow-menu > header {
+    display: flex;
+    flex: 0 0 auto;
+    align-items: center;
+    justify-content: space-between;
+    min-height: 58px;
+    padding: 8px 10px;
+    border-bottom: 1px solid rgba(126, 224, 245, 0.36);
+  }
+  .mobile-layer-drawer > header div {
+    display: grid;
+    gap: 3px;
+  }
+  .mobile-layer-drawer > header span {
+    color: rgba(158, 239, 255, 0.72);
+    font-size: 12px;
+    letter-spacing: 0.12em;
+  }
+  .mobile-layer-header-actions {
+    display: flex !important;
+    align-items: center;
+    gap: 6px !important;
+  }
+  .mobile-layer-drawer > header button,
+  .mobile-overflow-menu > header button {
+    width: 46px;
+    height: 44px;
+    border: 1px solid rgba(126, 224, 245, 0.42);
+    background: rgba(8, 28, 40, 0.88);
+    color: #d7f7ff;
+    font-size: 24px;
+  }
+  .mobile-layer-drawer > header button:disabled {
+    opacity: 0.35;
+  }
+  .mobile-layer-list {
+    display: flex;
+    flex: 1 1 auto;
+    flex-direction: column;
+    gap: 6px;
+    min-height: 0;
+    padding: 8px;
+    overflow-y: auto;
+  }
+  .mobile-layer-item {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 48px;
+    align-items: center;
+    min-height: 52px;
+    border: 1px solid rgba(126, 224, 245, 0.28);
+    background: rgba(8, 28, 40, 0.78);
+    color: #d7f7ff;
+  }
+  .mobile-layer-item.active {
+    border-color: #bdf7ff;
+    background: rgba(34, 112, 134, 0.94);
+    box-shadow: inset 4px 0 0 #8fefff;
+  }
+  .mobile-layer-item.hidden { opacity: 0.55; }
+  .mobile-layer-item.dragging {
+    opacity: 0.72;
+    box-shadow: 0 0 16px rgba(111, 233, 255, 0.72);
+  }
+  .mobile-layer-item.drag-over {
+    border-top: 3px solid #fff0a8;
+  }
+  .mobile-layer-select {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 8px;
+    align-self: stretch;
+    min-width: 0;
+    padding: 8px 10px;
+    border: 0;
+    background: transparent;
+    color: inherit;
+    text-align: left;
+  }
+  .mobile-layer-select small {
+    color: rgba(200, 240, 250, 0.62);
+    font-size: 12px;
+  }
+  .mobile-layer-drag-handle {
+    align-self: stretch;
+    min-width: 48px;
+    border: 0;
+    border-left: 1px solid rgba(126, 224, 245, 0.24);
+    background: rgba(3, 19, 29, 0.52);
+    color: #9fefff;
+    font-size: 26px;
+    touch-action: none;
+    cursor: grab;
+  }
+  .mobile-layer-drag-handle:active { cursor: grabbing; }
+  .danger-button {
+    border-color: rgba(255, 124, 124, 0.5) !important;
+    color: #ffb7b7 !important;
+  }
+  .mobile-layer-context-backdrop {
+    position: absolute;
+    z-index: 3;
+    inset: 0;
+    display: flex;
+    align-items: flex-end;
+    padding: 10px;
+    background: rgba(0, 8, 13, 0.44);
+  }
+  .mobile-layer-context-menu {
+    box-sizing: border-box;
+    display: grid;
+    width: 100%;
+    gap: 7px;
+    padding: 12px;
+    border: 1px solid #6de8ff;
+    border-radius: 12px 12px 4px 4px;
+    background: rgba(4, 25, 36, 0.99);
+    box-shadow: 0 -10px 28px rgba(34, 185, 219, 0.28);
+  }
+  .mobile-layer-context-menu strong {
+    padding: 4px 2px 8px;
+    color: #fff3b4;
+  }
+  .mobile-layer-context-menu button {
+    min-height: 48px;
+    border: 1px solid rgba(126, 224, 245, 0.38);
+    background: rgba(8, 28, 40, 0.92);
+    color: #d7f7ff;
+  }
+
+  .mobile-overflow-menu {
+    gap: 6px;
+    padding-bottom: calc(8px + env(safe-area-inset-bottom));
+  }
+  .mobile-overflow-menu > button {
+    display: grid;
+    gap: 4px;
+    min-height: 64px;
+    margin: 0 8px;
+    padding: 9px 12px;
+    border: 1px solid rgba(126, 224, 245, 0.3);
+    background: rgba(8, 28, 40, 0.82);
+    color: #d7f7ff;
+    text-align: left;
+  }
+  .mobile-overflow-menu > button.active {
+    border-color: #bdf7ff;
+    background: rgba(34, 112, 134, 0.76);
+  }
+  .mobile-overflow-menu > button span { font-weight: 700; }
+  .mobile-overflow-menu > button small {
+    color: rgba(200, 240, 250, 0.62);
+    font-size: 12px;
+  }
 }
 </style>
