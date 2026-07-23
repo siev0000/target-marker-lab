@@ -21,6 +21,23 @@ foreach ($entry in $sources.GetEnumerator()) {
   Write-Host "Copied $($entry.Key)"
 }
 
+$presetSource = Join-Path $gameRoot 'src/components/modals/data/targetMarkerPresets'
+$presetDestination = Join-Path $labRoot 'src/data/targetMarkerPresets'
+if (-not (Test-Path -LiteralPath $presetSource)) {
+  throw "Target marker preset directory was not found: $presetSource"
+}
+
+New-Item -ItemType Directory -Path $presetDestination -Force | Out-Null
+$presetFiles = Get-ChildItem -LiteralPath $presetSource -File -Filter '*.json'
+if ($presetFiles.Count -eq 0) {
+  throw "No target marker preset JSON files were found: $presetSource"
+}
+
+foreach ($presetFile in $presetFiles) {
+  Copy-Item -LiteralPath $presetFile.FullName -Destination (Join-Path $presetDestination $presetFile.Name) -Force
+  Write-Host "Copied target marker preset $($presetFile.Name)"
+}
+
 $utf8 = [System.Text.UTF8Encoding]::new($false)
 $targetMarkerPath = Join-Path $labRoot 'src/components/TargetMarker.vue'
 $targetMarker = [System.IO.File]::ReadAllText($targetMarkerPath, $utf8)

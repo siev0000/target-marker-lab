@@ -743,7 +743,7 @@ import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { getCurrentScale } from '../useScale.js'
 import BaseHudModal from './BaseHudModal.vue'
 import TargetMarker from './TargetMarker.vue'
-import magicCircleExport from '../../../../memo/target-markers/魔法陣.json'
+import magicCircleExport from '../data/targetMarkerPresets/magic-circle.json'
 
 const makeMotionState = overrides => ({
   enabled: true,
