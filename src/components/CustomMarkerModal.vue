@@ -56,17 +56,19 @@
           </button>
         </div>
         <div class="ring-tabs" aria-label="編集するレイヤー">
-          <span class="ring-tabs-label">EDIT LAYER</span>
-          <button
-            type="button"
-            class="ring-tab-add"
-            :disabled="draft.rings.length >= MAX_RINGS"
-            :title="draft.rings.length >= MAX_RINGS ? `レイヤーは${MAX_RINGS}個までです` : 'レイヤーを追加'"
-            aria-label="レイヤーを追加"
-            @click="addRing"
-          >
-            ＋
-          </button>
+          <div class="ring-tabs-header">
+            <span class="ring-tabs-label">レイヤー</span>
+            <button
+              type="button"
+              class="ring-tab-add"
+              :disabled="draft.rings.length >= MAX_RINGS"
+              :title="draft.rings.length >= MAX_RINGS ? `レイヤーは${MAX_RINGS}個までです` : '選択中のレイヤーの下へ追加'"
+              aria-label="選択中のレイヤーの下へ追加"
+              @click="addRing"
+            >
+              ＋
+            </button>
+          </div>
           <div class="ring-tabs-list">
             <button
               v-for="(ring, index) in draft.rings"
@@ -204,15 +206,92 @@
               </div>
             </details>
             <label class="setting-row">
-              <span>サイズ</span>
-              <input v-model.number="selectedOverall.size" type="range" min="60" max="150" step="1" />
-              <output>{{ selectedOverall.size }}%</output>
+              <span>全体の横幅</span>
+              <input v-model.number="selectedOverall.width" type="range" min="10" max="180" step="1" />
+              <output>{{ selectedOverall.width }}%</output>
+            </label>
+            <label class="setting-row">
+              <span>全体の縦幅</span>
+              <input v-model.number="selectedOverall.height" type="range" min="10" max="180" step="1" />
+              <output>{{ selectedOverall.height }}%</output>
             </label>
             <label class="setting-row">
               <span>全体の透明度</span>
               <input v-model.number="selectedOverall.opacity" type="range" min="25" max="100" step="1" />
               <output>{{ selectedOverall.opacity }}%</output>
             </label>
+            <details class="ring-advanced-settings">
+              <summary>マーカー全体の動き</summary>
+              <p>全レイヤーを一つのマーカーとして動かします。レイヤーごとの動きとも同時に使用できます。</p>
+              <label class="toggle-row state-enabled-toggle">
+                <input v-model="selectedWholeMotion.enabled" type="checkbox" />
+                <span>この状態で全体をアニメーションする</span>
+              </label>
+              <section class="motion-block">
+                <label class="toggle-row motion-toggle">
+                  <input v-model="selectedWholeMotion.rotateEnabled" type="checkbox" :disabled="!selectedWholeMotion.enabled" />
+                  <span>全体を回転</span>
+                </label>
+                <label v-if="selectedWholeMotion.rotateEnabled" class="setting-row">
+                  <span>回転速度</span>
+                  <input v-model.number="selectedWholeMotion.rotateDuration" type="range" min="1" max="20" step="1" :disabled="!selectedWholeMotion.enabled" />
+                  <output>{{ selectedWholeMotion.rotateDuration }}秒</output>
+                </label>
+                <label v-if="selectedWholeMotion.rotateEnabled" class="setting-row select-row">
+                  <span>回転方向</span>
+                  <select v-model="selectedWholeMotion.direction" :disabled="!selectedWholeMotion.enabled">
+                    <option value="normal">時計回り</option>
+                    <option value="reverse">反時計回り</option>
+                  </select>
+                </label>
+              </section>
+              <section class="motion-block">
+                <label class="toggle-row motion-toggle">
+                  <input v-model="selectedWholeMotion.pulseEnabled" type="checkbox" :disabled="!selectedWholeMotion.enabled" />
+                  <span>全体を縮小・拡大</span>
+                </label>
+                <label v-if="selectedWholeMotion.pulseEnabled" class="setting-row">
+                  <span>伸縮速度</span>
+                  <input v-model.number="selectedWholeMotion.pulseDuration" type="range" min="1" max="20" step="1" :disabled="!selectedWholeMotion.enabled" />
+                  <output>{{ selectedWholeMotion.pulseDuration }}秒</output>
+                </label>
+                <label v-if="selectedWholeMotion.pulseEnabled" class="setting-row">
+                  <span>伸縮量</span>
+                  <input v-model.number="selectedWholeMotion.pulseAmount" type="range" min="2" max="45" step="1" :disabled="!selectedWholeMotion.enabled" />
+                  <output>{{ selectedWholeMotion.pulseAmount }}%</output>
+                </label>
+              </section>
+              <section class="motion-block">
+                <label class="toggle-row motion-toggle">
+                  <input v-model="selectedWholeMotion.glowEnabled" type="checkbox" :disabled="!selectedWholeMotion.enabled" />
+                  <span>全体の発光を動かす</span>
+                </label>
+                <label v-if="selectedWholeMotion.glowEnabled" class="setting-row">
+                  <span>最小発光</span>
+                  <input v-model.number="selectedWholeMotion.glowMin" type="range" min="0" max="30" step="1" :disabled="!selectedWholeMotion.enabled" />
+                  <output>{{ selectedWholeMotion.glowMin }}</output>
+                </label>
+                <label v-if="selectedWholeMotion.glowEnabled" class="setting-row">
+                  <span>最大発光</span>
+                  <input v-model.number="selectedWholeMotion.glowMax" type="range" min="0" max="40" step="1" :disabled="!selectedWholeMotion.enabled" />
+                  <output>{{ selectedWholeMotion.glowMax }}</output>
+                </label>
+                <label v-if="selectedWholeMotion.glowEnabled" class="setting-row">
+                  <span>発光速度</span>
+                  <input v-model.number="selectedWholeMotion.glowDuration" type="range" min="0.5" max="10" step="0.5" :disabled="!selectedWholeMotion.enabled" />
+                  <output>{{ selectedWholeMotion.glowDuration }}秒</output>
+                </label>
+              </section>
+              <label class="setting-row">
+                <span>開始遅延</span>
+                <input v-model.number="selectedWholeMotion.delay" type="range" min="0" max="10" step="0.5" :disabled="!selectedWholeMotion.enabled" />
+                <output>{{ selectedWholeMotion.delay }}秒</output>
+              </label>
+              <label class="toggle-row">
+                <input v-model="selectedWholeMotion.repeat" type="checkbox" :disabled="!selectedWholeMotion.enabled" />
+                <span>全体の動きを繰り返す</span>
+              </label>
+            </details>
             <label class="toggle-row">
               <input v-model="selectedOverall.showCenterDot" type="checkbox" />
               <span>中央点を表示</span>
@@ -287,10 +366,15 @@
                 <option v-for="shape in shapes" :key="shape.key" :value="shape.key">{{ shape.label }}</option>
               </select>
             </label>
-            <label v-if="selectedRingAppearance.shape === 'moon'" class="setting-row">
-              <span>月の欠け方</span>
+            <label v-if="['moon', 'sharpMoon'].includes(selectedRingAppearance.shape)" class="setting-row">
+              <span>{{ selectedRingAppearance.shape === 'sharpMoon' ? '内円の大きさ' : '月の欠け方' }}</span>
               <input v-model.number="selectedRingAppearance.moonPhase" type="range" min="0" max="100" step="1" />
-              <output>{{ moonPhaseLabel(selectedRingAppearance.moonPhase) }}</output>
+              <output>{{ selectedRingAppearance.shape === 'sharpMoon' ? `${selectedRingAppearance.moonPhase}%` : moonPhaseLabel(selectedRingAppearance.moonPhase) }}</output>
+            </label>
+            <label v-if="selectedRingAppearance.shape === 'sharpMoon'" class="setting-row">
+              <span>内円の接触位置</span>
+              <input v-model.number="selectedRingAppearance.innerCircleAngle" type="range" min="0" max="359" step="1" />
+              <output>{{ selectedRingAppearance.innerCircleAngle }}°</output>
             </label>
             <label class="setting-row">
               <span>色</span>
@@ -494,6 +578,23 @@
                 <option value="double">二重線</option>
               </select>
             </label>
+            <template v-if="selectedRingAppearance.renderMode !== 'textRing' && selectedRingAppearance.lineStyle === 'dashed'">
+              <label class="setting-row">
+                <span>破線の長さ</span>
+                <input v-model.number="selectedRingAppearance.dashLength" type="range" min="1" max="40" step="1" />
+                <output>{{ selectedRingAppearance.dashLength }}</output>
+              </label>
+              <label class="setting-row">
+                <span>破線の間隔</span>
+                <input v-model.number="selectedRingAppearance.dashGap" type="range" min="1" max="40" step="1" />
+                <output>{{ selectedRingAppearance.dashGap }}</output>
+              </label>
+              <label class="setting-row">
+                <span>破線のランダム性</span>
+                <input v-model.number="selectedRingAppearance.dashRandomness" type="range" min="0" max="100" step="1" />
+                <output>{{ selectedRingAppearance.dashRandomness }}%</output>
+              </label>
+            </template>
             <label v-if="selectedRingAppearance.renderMode !== 'textRing'" class="setting-row">
               <span>線の太さ</span>
               <input v-model.number="selectedRingAppearance.lineWidth" type="range" min="1" max="8" step="1" />
@@ -554,7 +655,11 @@
                 <input v-model="selectedRingAppearance.segmentColors[index - 1]" type="color" />
               </label>
             </div>
-            <details class="ring-advanced-settings">
+            <details
+              class="ring-advanced-settings"
+              :open="ringAdvancedSettingsOpen"
+              @toggle="ringAdvancedSettingsOpen = $event.currentTarget.open"
+            >
               <summary>詳細設定</summary>
               <p>このレイヤーだけに適用する名前、位置、反転、重なり方、線の見た目を設定します。</p>
               <label class="setting-row text-setting-row">
@@ -768,6 +873,7 @@ import { getCurrentScale } from '../useScale.js'
 import BaseHudModal from './BaseHudModal.vue'
 import TargetMarker from './TargetMarker.vue'
 import magicCircleExport from '../data/targetMarkerPresets/magic-circle.json'
+import symbolMagicCircleExport from '../data/targetMarkerPresets/symbol-magic-circle.json'
 
 const makeMotionState = overrides => ({
   enabled: true,
@@ -796,6 +902,8 @@ const makeMotionState = overrides => ({
 const makeOverallAppearance = overrides => ({
   shape: 'circle',
   size: 100,
+  width: 100,
+  height: 100,
   opacity: 88,
   showCenterDot: true,
   ...overrides
@@ -840,6 +948,7 @@ const makeRingAppearance = overrides => ({
   cutoutEnabled: false,
   cutoutSize: 62,
   moonPhase: 78,
+  innerCircleAngle: 0,
   eraseBelow: false,
   useSegmentColors: false,
   segmentColors: Array(TEXT_ITEM_LIMIT).fill('#8fefff'),
@@ -851,6 +960,9 @@ const makeRingAppearance = overrides => ({
   lineJoin: 'miter',
   miterLimit: 4,
   dashOffset: 0,
+  dashLength: 14,
+  dashGap: 8,
+  dashRandomness: 0,
   doubleLineGap: 18,
   waveAmplitude: 4,
   waveCount: 12,
@@ -895,6 +1007,10 @@ const DEFAULT_SETTINGS = {
     idle: makeOverallAppearance(),
     moving: makeOverallAppearance()
   },
+  wholeMotion: {
+    idle: makeMotionState({ enabled: false, rotateEnabled: false }),
+    moving: makeMotionState({ enabled: false, rotateEnabled: false })
+  },
   transition: {
     sequence: 'before',
     morphInDuration: 250,
@@ -916,7 +1032,7 @@ const props = defineProps({
 })
 
 const emit = defineEmits(['close', 'save'])
-const MAX_RINGS = 16
+const MAX_RINGS = 24
 const MODAL_BASE_WIDTH = 720
 const MODAL_BASE_HEIGHT = 1280
 const modalScale = ref(1)
@@ -975,8 +1091,8 @@ const makeRing = index => ({
     moving: makeRingAppearance({ width: Math.max(20, 100 - index * 14), height: Math.max(20, 100 - index * 14) })
   },
   motion: {
-    idle: makeMotionState(),
-    moving: makeMotionState()
+    idle: makeMotionState({ enabled: false, rotateEnabled: false }),
+    moving: makeMotionState({ enabled: false, rotateEnabled: false })
   }
 })
 const normalizeRingMotion = ring => {
@@ -1028,6 +1144,9 @@ const normalizeRingAppearance = ring => {
     lineWidth: Number(ring.lineWidth) || 2,
     shape: ring.shape || 'circle',
     lineStyle: ring.lineStyle || 'solid',
+    dashLength: Math.min(40, Math.max(1, Number(ring.dashLength) || 14)),
+    dashGap: Math.min(40, Math.max(1, Number(ring.dashGap) || 8)),
+    dashRandomness: Math.min(100, Math.max(0, Number(ring.dashRandomness) || 0)),
     doubleLineGap: Number.isFinite(Number(ring.doubleLineGap)) ? Number(ring.doubleLineGap) : 18,
     waveAmplitude: Number.isFinite(Number(ring.waveAmplitude)) ? Number(ring.waveAmplitude) : 4,
     waveCount: Number.isFinite(Number(ring.waveCount)) ? Number(ring.waveCount) : 12,
@@ -1041,6 +1160,7 @@ const normalizeRingAppearance = ring => {
     cutoutEnabled: ring.cutoutEnabled === true,
     cutoutSize: Math.min(90, Math.max(10, Number(ring.cutoutSize) || 62)),
     moonPhase: Math.min(100, Math.max(0, Number.isFinite(Number(ring.moonPhase)) ? Number(ring.moonPhase) : 78)),
+    innerCircleAngle: Math.min(359, Math.max(0, Number(ring.innerCircleAngle) || 0)),
     eraseBelow: ring.eraseBelow === true,
     useSegmentColors: ring.useSegmentColors === true,
     segmentColors: Array.from({ length: TEXT_ITEM_LIMIT }, (_, index) => ring.segmentColors?.[index] || ring.color || '#8fefff'),
@@ -1114,15 +1234,33 @@ const createDraftFromSettings = settings => {
   const legacyOverall = makeOverallAppearance({
     shape: source.shape || DEFAULT_SETTINGS.shape,
     size: Number(source.size) || DEFAULT_SETTINGS.size,
+    width: Number(source.width) || Number(source.size) || DEFAULT_SETTINGS.size,
+    height: Number(source.height) || Number(source.size) || DEFAULT_SETTINGS.size,
     opacity: Number(source.opacity) || DEFAULT_SETTINGS.opacity,
     showCenterDot: source.showCenterDot !== false
   })
+  const idleOverall = source.appearance?.idle || {}
+  const movingOverall = source.appearance?.moving || {}
   return {
     ...DEFAULT_SETTINGS,
     ...source,
     appearance: {
-      idle: { ...legacyOverall, ...(source.appearance?.idle || {}) },
-      moving: { ...legacyOverall, ...(source.appearance?.moving || {}) }
+      idle: {
+        ...legacyOverall,
+        ...idleOverall,
+        width: Number(idleOverall.width) || Number(idleOverall.size) || legacyOverall.width,
+        height: Number(idleOverall.height) || Number(idleOverall.size) || legacyOverall.height
+      },
+      moving: {
+        ...legacyOverall,
+        ...movingOverall,
+        width: Number(movingOverall.width) || Number(movingOverall.size) || legacyOverall.width,
+        height: Number(movingOverall.height) || Number(movingOverall.size) || legacyOverall.height
+      }
+    },
+    wholeMotion: {
+      idle: makeMotionState({ enabled: false, rotateEnabled: false, ...(source.wholeMotion?.idle || {}) }),
+      moving: makeMotionState({ enabled: false, rotateEnabled: false, ...(source.wholeMotion?.moving || {}) })
     },
     transition: { ...DEFAULT_SETTINGS.transition, ...(source.transition || {}) },
     behavior: { ...DEFAULT_SETTINGS.behavior, ...(source.behavior || {}) },
@@ -1156,13 +1294,15 @@ const libraryName = ref('')
 const libraryNotice = ref('')
 const markerSettingsFileInput = ref(null)
 const activeSection = ref('rings')
+const ringAdvancedSettingsOpen = ref(false)
 const appliedPresetKey = ref(null)
 const selectedRingId = ref(draft.value.rings[0].id)
 const selectedRingIndex = computed(() => Math.max(0, draft.value.rings.findIndex(ring => ring.id === selectedRingId.value)))
 const selectedRing = computed(() => draft.value.rings[selectedRingIndex.value])
 const selectedOverall = computed(() => draft.value.appearance[editingState.value])
+const selectedWholeMotion = computed(() => draft.value.wholeMotion[editingState.value])
 const selectedRingAppearance = computed(() => selectedRing.value.appearance[editingState.value])
-const CUTOUT_SHAPES = new Set(['circle', 'point', 'square', 'triangle', 'diamond', 'star', 'hexagram', 'octagram', 'sparkle', 'arrow', 'arrowhead', 'sector', 'moon', 'heart', 'sun'])
+const CUTOUT_SHAPES = new Set(['circle', 'point', 'square', 'triangle', 'diamond', 'star', 'hexagram', 'octagram', 'sparkle', 'arrow', 'arrowhead', 'sector', 'moon', 'sharpMoon', 'heart', 'sun'])
 const selectedRingSupportsCutout = computed(() => CUTOUT_SHAPES.has(selectedRingAppearance.value.shape))
 const selectedRingSupportsLayerErase = computed(() => (
   CUTOUT_SHAPES.has(selectedRingAppearance.value.shape)
@@ -1410,7 +1550,7 @@ const previewBackgroundStyle = computed(() => ({
 }))
 
 const sections = [
-  { key: 'rings', label: 'レイヤー' },
+  { key: 'rings', label: '形状・線' },
   { key: 'motion', label: '動き' },
   { key: 'overall', label: '全体設定' },
   { key: 'display', label: '表示設定' },
@@ -1435,6 +1575,7 @@ const shapes = [
   { key: 'octagram', label: '八芒星' },
   { key: 'sparkle', label: '十字星' },
   { key: 'moon', label: '月' },
+  { key: 'sharpMoon', label: '二重円（可変）' },
   { key: 'heart', label: 'ハート' },
   { key: 'sun', label: '太陽' },
   { key: 'arrow', label: '矢印 ⇒' },
@@ -1597,6 +1738,12 @@ const existingMarkerPresets = [
     settings: magicCircleExport.settings
   },
   {
+    key: 'symbol-magic-circle-json',
+    label: '記号魔法陣',
+    color: symbolMagicCircleExport.settings?.color || '#8fefff',
+    settings: symbolMagicCircleExport.settings
+  },
+  {
     key: 'magic-star-ring',
     label: '魔法陣・星環',
     color: '#8fefff',
@@ -1719,7 +1866,7 @@ const existingMarkerPresets = [
 const addRing = () => {
   if (draft.value.rings.length >= MAX_RINGS) return
   const ring = makeRing(draft.value.rings.length + 1)
-  draft.value.rings.push(ring)
+  draft.value.rings.splice(selectedRingIndex.value + 1, 0, ring)
   selectRing(ring.id)
 }
 const duplicateSelectedRing = () => {
@@ -1818,6 +1965,10 @@ const reset = () => {
       idle: { ...DEFAULT_SETTINGS.appearance.idle },
       moving: { ...DEFAULT_SETTINGS.appearance.moving }
     },
+    wholeMotion: {
+      idle: { ...DEFAULT_SETTINGS.wholeMotion.idle },
+      moving: { ...DEFAULT_SETTINGS.wholeMotion.moving }
+    },
     transition: { ...DEFAULT_SETTINGS.transition },
     behavior: { ...DEFAULT_SETTINGS.behavior },
     rings: DEFAULT_SETTINGS.rings.map(cloneRing)
@@ -1839,6 +1990,7 @@ const copyEditingStateToOther = () => {
   const source = editingState.value
   const destination = source === 'idle' ? 'moving' : 'idle'
   draft.value.appearance[destination] = { ...draft.value.appearance[source] }
+  draft.value.wholeMotion[destination] = { ...draft.value.wholeMotion[source] }
   draft.value.rings.forEach(ring => {
     ring.appearance[destination] = {
       ...ring.appearance[source],
@@ -2165,7 +2317,7 @@ p { margin-top: 8px; color: rgba(200, 240, 250, 0.72); font-size: 20px; line-hei
 
 .editor-layout {
   display: grid;
-  grid-template-columns: 142px 1fr;
+  grid-template-columns: 156px minmax(0, 1fr);
   grid-template-rows: auto auto minmax(0, 1fr);
   min-height: 0;
   border: 1px solid rgba(116, 220, 245, 0.3);
@@ -2208,29 +2360,43 @@ p { margin-top: 8px; color: rgba(200, 240, 250, 0.72); font-size: 20px; line-hei
 
 .ring-tabs {
   display: flex;
-  grid-column: 1 / -1;
-  align-items: center;
-  gap: 12px;
+  grid-column: 1;
+  grid-row: 2 / 4;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
   min-width: 0;
-  padding: 8px 10px 0;
-  border-bottom: 1px solid rgba(116, 220, 245, 0.3);
+  min-height: 0;
+  padding: 10px;
+  border-right: 1px solid rgba(116, 220, 245, 0.3);
   background: rgba(2, 12, 21, 0.92);
 }
 
 .ring-tabs-label {
   flex: 0 0 auto;
-  padding-bottom: 8px;
   color: rgba(158, 239, 255, 0.68);
   font-size: 20px;
-  letter-spacing: 0.14em;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+}
+
+.ring-tabs-header {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 6px;
+  min-height: 32px;
 }
 
 .ring-tabs-list {
   display: flex;
   flex: 1 1 auto;
+  flex-direction: column;
   min-width: 0;
+  min-height: 0;
   gap: 4px;
-  overflow-x: auto;
+  overflow-x: hidden;
+  overflow-y: auto;
 }
 
 .ring-tabs-list button {
@@ -2238,13 +2404,12 @@ p { margin-top: 8px; color: rgba(200, 240, 250, 0.72); font-size: 20px; line-hei
   align-items: center;
   gap: 6px;
   flex: 0 0 auto;
-  justify-content: center;
+  justify-content: flex-start;
   min-width: 0;
-  width: max-content;
-  padding: 9px 18px;
+  width: 100%;
+  padding: 9px 10px;
   border: 1px solid rgba(126, 224, 245, 0.28);
-  border-bottom: 0;
-  border-radius: 5px 5px 0 0;
+  border-radius: 4px;
   background: rgba(8, 28, 40, 0.72);
   color: rgba(215, 247, 255, 0.68);
   cursor: pointer;
@@ -2254,23 +2419,26 @@ p { margin-top: 8px; color: rgba(200, 240, 250, 0.72); font-size: 20px; line-hei
   border-color: #bdf7ff;
   background: rgba(34, 112, 134, 0.96);
   color: #fff;
-  box-shadow: 0 -3px 10px rgba(89, 220, 250, 0.3);
+  box-shadow: 0 0 10px rgba(89, 220, 250, 0.3);
 }
 
 .ring-tabs-list button.hidden { opacity: 0.48; }
 .ring-tabs-list button.active.hidden { opacity: 0.78; }
 .ring-tabs .ring-tab-add {
-  flex: 0 0 38px;
-  width: 38px;
-  height: 35px;
+  flex: 0 0 32px;
+  margin-left: auto;
+  width: 32px;
+  height: 30px;
   padding: 0;
   border: 1px solid rgba(126, 224, 245, 0.5);
   border-radius: 4px;
   background: rgba(8, 28, 40, 0.88);
   color: #8defff;
   font-size: 24px;
+  font-weight: 700;
   line-height: 1;
   cursor: pointer;
+  box-shadow: inset 0 0 8px rgba(89, 220, 250, 0.12);
 }
 .ring-tabs .ring-tab-add:hover:not(:disabled) {
   border-color: #bdf7ff;
@@ -2291,19 +2459,46 @@ p { margin-top: 8px; color: rgba(200, 240, 250, 0.72); font-size: 20px; line-hei
 }
 
 .setting-list {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  padding: 10px;
-  border-right: 1px solid rgba(116, 220, 245, 0.22);
+  display: grid;
+  grid-column: 2;
+  grid-row: 2;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 4px;
+  min-width: 0;
+  padding: 8px;
+  border-bottom: 1px solid rgba(116, 220, 245, 0.22);
   background: rgba(3, 14, 24, 0.65);
 }
 
-.setting-list button { padding: 10px; text-align: left; }
-.setting-list button.active,
-.choice-grid button.active { border-color: #c4faff; background: rgba(34, 112, 134, 0.9); box-shadow: 0 0 9px rgba(89, 220, 250, 0.32); }
+.setting-list button {
+  min-width: 0;
+  padding: 8px 4px;
+  border-color: rgba(126, 224, 245, 0.24);
+  background: rgba(5, 23, 34, 0.74);
+  color: rgba(215, 247, 255, 0.72);
+  font-weight: 700;
+  text-align: center;
+  white-space: nowrap;
+}
+.setting-list button.active {
+  border-color: #c4faff;
+  background: rgba(34, 112, 134, 0.9);
+  color: #fff;
+  box-shadow: inset 0 3px 0 #8fefff, 0 0 9px rgba(89, 220, 250, 0.32);
+}
+.choice-grid button.active {
+  border-color: #c4faff;
+  background: rgba(34, 112, 134, 0.9);
+  box-shadow: 0 0 9px rgba(89, 220, 250, 0.32);
+}
 
-.setting-content { padding: 16px; overflow-y: auto; }
+.setting-content {
+  grid-column: 2;
+  grid-row: 3;
+  min-width: 0;
+  padding: 16px;
+  overflow-y: auto;
+}
 .render-mode-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
