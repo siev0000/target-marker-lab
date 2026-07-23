@@ -169,35 +169,60 @@
       aria-hidden="true"
     >
       <div class="custom-marker-motion">
+        <svg class="custom-layer-mask-definitions" aria-hidden="true">
+          <defs>
+            <mask
+              v-for="ring in customRings"
+              :id="getCustomLayerMaskId(ring)"
+              :key="getCustomLayerMaskId(ring)"
+              x="0"
+              y="0"
+              width="1"
+              height="1"
+              maskUnits="objectBoundingBox"
+              maskContentUnits="objectBoundingBox"
+            >
+              <rect x="0" y="0" width="1" height="1" fill="white" />
+              <path
+                v-for="eraser in getCustomErasersAbove(ring)"
+                :key="eraser.id"
+                :d="getCustomShapePath(eraser.shape || customMarkerAppearance.shape, eraser)"
+                :transform="getCustomLayerEraseTransform(eraser)"
+                fill="black"
+                stroke="black"
+              />
+            </mask>
+          </defs>
+        </svg>
         <span
           v-for="ring in customRings"
           :key="ring.id"
-          class="custom-marker-ring-orbit"
-          :class="[
-            {
-                'is-animated': isCustomRingAnimated(ring) && isCustomWholeRotationEnabled(ring),
-              'is-hidden': ring.visible === false
-            }
-          ]"
-          :style="getCustomRingMotionStyle(ring)"
+          class="custom-marker-layer-frame"
+          :class="{ 'is-hidden': ring.visible === false }"
+          :style="getCustomLayerFrameStyle(ring)"
         >
           <span
-            class="custom-marker-ring-highlight"
-            :class="{ 'is-editor-highlighted': ring.id === highlightRingId }"
-            :style="getCustomRingTransformStyle(ring)"
+            class="custom-marker-ring-orbit"
+            :class="{ 'is-animated': isCustomRingAnimated(ring) && isCustomWholeRotationEnabled(ring) }"
+            :style="getCustomRingMotionStyle(ring)"
           >
-          <span
-            class="custom-marker-ring"
-            :class="[
-              `is-mode-${getCustomRenderMode(ring)}`,
-              getCustomRingSplitDirection(ring),
-              {
-                'is-layout-arc': isCustomCircumference(ring),
-                'is-animated': isCustomRingAnimated(ring) && isCustomRingPulseEnabled(ring)
-              }
-            ]"
-            :style="getCustomRingStyle(ring)"
-          >
+            <span
+              class="custom-marker-ring-highlight"
+              :class="{ 'is-editor-highlighted': ring.id === highlightRingId }"
+              :style="getCustomRingTransformStyle(ring)"
+            >
+            <span
+              class="custom-marker-ring"
+              :class="[
+                `is-mode-${getCustomRenderMode(ring)}`,
+                getCustomRingSplitDirection(ring),
+                {
+                  'is-layout-arc': isCustomCircumference(ring),
+                  'is-animated': isCustomRingAnimated(ring) && isCustomRingPulseEnabled(ring)
+                }
+              ]"
+              :style="getCustomRingStyle(ring)"
+            >
             <template v-if="getCustomRenderMode(ring) === 'textRing'">
               <span
                 v-for="(text, textIndex) in getCustomTextItems(ring)"
@@ -260,9 +285,21 @@
               :class="[`custom-shape-${ring.shape || customMarkerAppearance.shape}`, getCustomSegmentAnimationClasses(ring)]"
               :style="getCustomRingSegmentStyle(ring, segmentIndex - 1)"
             >
+              <defs v-if="ring.cutoutEnabled">
+                <mask :id="getCustomCutoutMaskId(ring, segmentIndex)">
+                  <rect width="100" height="100" fill="white" />
+                  <path
+                    :d="getCustomShapePath(ring.shape || customMarkerAppearance.shape, ring)"
+                    :transform="getCustomCutoutTransform(ring)"
+                    fill="black"
+                    stroke="black"
+                  />
+                </mask>
+              </defs>
               <path
                 class="custom-segment-fill"
                 :d="getCustomShapePath(ring.shape || customMarkerAppearance.shape, ring)"
+                :mask="ring.cutoutEnabled ? `url(#${getCustomCutoutMaskId(ring, segmentIndex)})` : null"
               />
               <path
                 class="custom-segment-line"
@@ -274,7 +311,8 @@
                 :d="getCustomShapePath(ring.shape || customMarkerAppearance.shape, ring)"
               />
             </svg>
-          </span>
+            </span>
+            </span>
           </span>
         </span>
       </div>
@@ -490,6 +528,8 @@ const CUSTOM_SHAPE_PATHS = {
   hexagram: 'M50 4 L90 73 H10 Z M10 27 H90 L50 96 Z',
   octagram: 'M50 3 L61 27 L84 16 L73 39 L97 50 L73 61 L84 84 L61 73 L50 97 L39 73 L16 84 L27 61 L3 50 L27 39 L16 16 L39 27 Z',
   sparkle: 'M50 3 C56 35 65 44 97 50 C65 56 56 65 50 97 C44 65 35 56 3 50 C35 44 44 35 50 3 Z',
+  heart: 'M50 92 C42 81 8 61 8 34 C8 15 31 7 50 29 C69 7 92 15 92 34 C92 61 58 81 50 92 Z',
+  sun: 'M50 22 A28 28 0 1 1 49.99 22 Z M50 2 L56 16 H44 Z M50 98 L44 84 H56 Z M2 50 L16 44 V56 Z M98 50 L84 56 V44 Z M16 16 L31 22 L22 31 Z M84 16 L78 31 L69 22 Z M16 84 L22 69 L31 78 Z M84 84 L69 78 L78 69 Z',
   arrow: 'M5 34 H55 V14 L96 50 L55 86 V66 H5 Z',
   arrowhead: 'M12 8 L92 50 L12 92 L34 50 Z',
   sector: 'M50 50 L50 5 A45 45 0 0 1 95 50 Z',
@@ -576,9 +616,28 @@ const getCustomMagitechWavePath = ring => {
   }
   return points.map(([x, y], index) => `${index === 0 ? 'M' : 'L'} ${x.toFixed(2)} ${y.toFixed(2)}`).join(' ') + ' Z'
 }
-const getCustomShapePath = (shape, ring) => shape === 'magitechWave'
-  ? getCustomMagitechWavePath(ring)
-  : CUSTOM_SHAPE_PATHS[shape] || CUSTOM_SHAPE_PATHS.circle
+const getCustomMoonPath = ring => {
+  const phase = Math.min(100, Math.max(0, Number(ring?.moonPhase) || 0))
+  if (phase <= 0) return CUSTOM_SHAPE_PATHS.circle
+
+  const radius = 46
+  const centerDistance = 88 - phase * 0.74
+  const intersectionX = 50 + centerDistance / 2
+  const intersectionOffsetY = Math.sqrt(Math.max(0, radius ** 2 - (centerDistance / 2) ** 2))
+  const topY = 50 - intersectionOffsetY
+  const bottomY = 50 + intersectionOffsetY
+  return `M ${intersectionX.toFixed(2)} ${topY.toFixed(2)} A ${radius} ${radius} 0 1 0 ${intersectionX.toFixed(2)} ${bottomY.toFixed(2)} A ${radius} ${radius} 0 0 1 ${intersectionX.toFixed(2)} ${topY.toFixed(2)} Z`
+}
+const getCustomShapePath = (shape, ring) => {
+  if (shape === 'magitechWave') return getCustomMagitechWavePath(ring)
+  if (shape === 'moon') return getCustomMoonPath(ring)
+  return CUSTOM_SHAPE_PATHS[shape] || CUSTOM_SHAPE_PATHS.circle
+}
+const getCustomCutoutMaskId = (ring, segmentIndex) => `custom-cutout-${String(ring.id).replace(/[^a-zA-Z0-9_-]/g, '-')}-${segmentIndex}`
+const getCustomCutoutTransform = ring => {
+  const scale = Math.min(0.9, Math.max(0.1, (Number(ring.cutoutSize) || 62) / 100))
+  return `translate(50 50) scale(${scale}) translate(-50 -50)`
+}
 const getCustomRingSplitDirection = ring => {
   const legacySize = Number(ring.size) || 100
   const width = Number(ring.width) || legacySize
@@ -831,10 +890,52 @@ const getCustomRingTransformStyle = ring => ({
   mixBlendMode: ['normal', 'screen', 'plus-lighter', 'lighten'].includes(ring.blendMode) ? ring.blendMode : 'normal',
   scale: `${ring.flipX === true ? -1 : 1} ${ring.flipY === true ? -1 : 1}`
 })
+const getCustomLayerMaskId = ring => `custom-layer-mask-${String(ring.id).replace(/[^a-zA-Z0-9_-]/g, '-')}`
+const getCustomLayerOrder = ring => {
+  const index = customRings.value.findIndex(candidate => candidate.id === ring.id)
+  return {
+    zIndex: Math.min(32, Math.max(0, Number(ring.zIndex) || 0)),
+    index
+  }
+}
+const isCustomLayerAbove = (candidate, target) => {
+  const candidateOrder = getCustomLayerOrder(candidate)
+  const targetOrder = getCustomLayerOrder(target)
+  return candidateOrder.zIndex > targetOrder.zIndex
+    || (candidateOrder.zIndex === targetOrder.zIndex && candidateOrder.index < targetOrder.index)
+}
+const getCustomErasersAbove = ring => customRings.value.filter(candidate => (
+  candidate.eraseBelow === true
+  && candidate.visible !== false
+  && ['continuous', 'free', 'center'].includes(getCustomRenderMode(candidate))
+  && isCustomLayerAbove(candidate, ring)
+))
+const getCustomLayerEraseTransform = ring => {
+  const legacySize = Number(ring.size) || 100
+  const widthScale = Math.min(140, Math.max(1, Number(ring.width) || legacySize)) / 10000
+  const heightScale = Math.min(140, Math.max(1, Number(ring.height) || legacySize)) / 10000
+  const centerX = 0.5 + Math.min(50, Math.max(-50, Number(ring.offsetX) || 0)) / 100
+  const centerY = 0.5 + Math.min(50, Math.max(-50, Number(ring.offsetY) || 0)) / 100
+  const angle = Math.min(359, Math.max(0, Number(ring.angle) || 0))
+  const flipX = ring.flipX === true ? -1 : 1
+  const flipY = ring.flipY === true ? -1 : 1
+  return `translate(${centerX} ${centerY}) rotate(${angle}) scale(${widthScale * flipX} ${heightScale * flipY}) translate(-50 -50)`
+}
+const getCustomLayerFrameStyle = ring => {
+  const erasers = getCustomErasersAbove(ring)
+  const maskValue = erasers.length > 0 ? `url(#${getCustomLayerMaskId(ring)})` : undefined
+  const order = getCustomLayerOrder(ring)
+  const layerCount = customRings.value.length
+  return {
+    // 同じ重なり順では、レイヤー番号が小さいほど前面に描画する。
+    zIndex: String(order.zIndex * (layerCount + 1) + (layerCount - order.index)),
+    mask: maskValue,
+    WebkitMask: maskValue
+  }
+}
 const getCustomRingMotionStyle = ring => {
   const motion = getCustomRingMotion(ring)
   return {
-    zIndex: String(Math.min(32, Math.max(0, Number(ring.zIndex) || 0))),
     '--custom-ring-rotate-duration': `${Math.max(0.4, Number(motion.rotateDuration) || 8)}s`,
     '--custom-ring-pulse-duration': `${Math.max(0.4, Number(motion.pulseDuration) || 3)}s`,
     '--custom-ring-iteration': motion.repeat === false ? '1' : 'infinite',
@@ -3098,6 +3199,19 @@ onBeforeUnmount(() => {
   inset: 0;
 }
 
+.custom-layer-mask-definitions {
+  position: absolute;
+  width: 0;
+  height: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.custom-marker-layer-frame {
+  position: absolute;
+  inset: 0;
+}
+
 .custom-marker-ring-orbit {
   position: absolute;
   inset: 0;
@@ -3256,6 +3370,7 @@ onBeforeUnmount(() => {
   position: absolute;
 }
 
+.custom-marker-layer-frame.is-hidden,
 .custom-marker-ring-orbit.is-hidden { display: none; }
 .custom-marker-ring-orbit.is-animated,
 .custom-marker-ring.is-animated {

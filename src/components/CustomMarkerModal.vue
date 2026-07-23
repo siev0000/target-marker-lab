@@ -55,14 +55,14 @@
             {{ editingState === 'idle' ? '停止→移動へコピー' : '移動→停止へコピー' }}
           </button>
         </div>
-        <div class="ring-tabs" aria-label="編集するリング">
-          <span class="ring-tabs-label">EDIT RING</span>
+        <div class="ring-tabs" aria-label="編集するレイヤー">
+          <span class="ring-tabs-label">EDIT LAYER</span>
           <button
             type="button"
             class="ring-tab-add"
             :disabled="draft.rings.length >= MAX_RINGS"
             :title="draft.rings.length >= MAX_RINGS ? `レイヤーは${MAX_RINGS}個までです` : 'レイヤーを追加'"
-            aria-label="リングを追加"
+            aria-label="レイヤーを追加"
             @click="addRing"
           >
             ＋
@@ -97,6 +97,11 @@
           <template v-if="activeSection === 'library'">
             <h3>保存マーカー</h3>
             <p>作成中のマーカーへ名前を付け、最大20件までこのブラウザに保存できます。</p>
+            <div class="library-storage-status">
+              <span>保存数 <strong>{{ savedMarkers.length }} / {{ MAX_SAVED_MARKERS }}</strong></span>
+              <span>残り <strong>{{ remainingMarkerSlots }}件</strong></span>
+              <span>使用量 <strong>{{ markerLibrarySizeLabel }}</strong></span>
+            </div>
             <label class="library-name-row">
               <span>保存名</span>
               <input v-model="libraryName" type="text" maxlength="32" placeholder="マーカー名" />
@@ -120,7 +125,7 @@
                 <button type="button" class="library-marker-summary" @click="selectSavedMarker(marker)">
                   <span class="library-marker-color" :style="{ backgroundColor: marker.settings?.color || '#8fefff' }"></span>
                   <span class="library-marker-name">{{ marker.name }}</span>
-                  <span class="library-marker-meta">{{ marker.settings?.rings?.length || 0 }}リング</span>
+                  <span class="library-marker-meta">{{ marker.settings?.rings?.length || 0 }}レイヤー</span>
                 </button>
                 <div class="library-marker-actions">
                   <button type="button" @click="loadSavedMarker(marker)">読込</button>
@@ -132,8 +137,8 @@
 
           <template v-else-if="activeSection === 'existing'">
             <h3>既存マーカー</h3>
-            <p>選択したマーカーを、編集可能なリング設定として作成中データへ反映します。</p>
-            <div class="preset-notice">現在のリング設定は選択したプリセットで置き換わります。</div>
+            <p>選択したマーカーを、編集可能なレイヤー設定として作成中データへ反映します。</p>
+            <div class="preset-notice">現在のレイヤー設定は選択したプリセットで置き換わります。</div>
             <div class="existing-preset-grid">
               <button
                 v-for="preset in existingMarkerPresets"
@@ -177,8 +182,8 @@
             <h3>全体設定</h3>
             <p>マーカー全体の形、サイズ、表示を設定します。</p>
             <details class="danger-settings">
-              <summary>全リングの形状を一括変更</summary>
-              <p>すべてのリング形状を書き換えます。個別に設定した形状は失われます。</p>
+              <summary>全レイヤーの形状を一括変更</summary>
+              <p>すべてのレイヤー形状を書き換えます。個別に設定した形状は失われます。</p>
               <div class="choice-grid">
                 <button
                   v-for="shape in shapes"
@@ -191,7 +196,7 @@
                 </button>
               </div>
               <div v-if="pendingOverallShape" class="shape-confirmation">
-                <strong>全リングを「{{ shapeLabel(pendingOverallShape) }}」へ変更しますか？</strong>
+                <strong>全レイヤーを「{{ shapeLabel(pendingOverallShape) }}」へ変更しますか？</strong>
                 <div>
                   <button type="button" @click="confirmOverallShapeChange">変更する</button>
                   <button type="button" @click="pendingOverallShape = null">キャンセル</button>
@@ -253,13 +258,13 @@
           <template v-else-if="activeSection === 'rings'">
             <div class="section-heading">
               <div>
-                <h3>リング</h3>
-                <p>追加したリングごとに表示設定を変更できます。</p>
+                <h3>レイヤー</h3>
+                <p>追加したレイヤーごとに表示設定を変更できます。</p>
               </div>
               <div class="ring-action-buttons">
                 <button type="button" :disabled="draft.rings.length >= MAX_RINGS" @click="duplicateSelectedRing">複製</button>
-                <button type="button" :disabled="selectedRingIndex <= 0" @click="moveSelectedRing(-1)">後ろへ</button>
-                <button type="button" :disabled="selectedRingIndex >= draft.rings.length - 1" @click="moveSelectedRing(1)">前へ</button>
+                <button type="button" :disabled="selectedRingIndex >= draft.rings.length - 1" @click="moveSelectedRing(1)">後ろへ</button>
+                <button type="button" :disabled="selectedRingIndex <= 0" @click="moveSelectedRing(-1)">前へ</button>
               </div>
             </div>
             <div class="render-mode-grid">
@@ -281,6 +286,11 @@
               <select v-model="selectedRingAppearance.shape" @change="onRingShapeChange">
                 <option v-for="shape in shapes" :key="shape.key" :value="shape.key">{{ shape.label }}</option>
               </select>
+            </label>
+            <label v-if="selectedRingAppearance.shape === 'moon'" class="setting-row">
+              <span>月の欠け方</span>
+              <input v-model.number="selectedRingAppearance.moonPhase" type="range" min="0" max="100" step="1" />
+              <output>{{ moonPhaseLabel(selectedRingAppearance.moonPhase) }}</output>
             </label>
             <label class="setting-row">
               <span>色</span>
@@ -335,9 +345,9 @@
                 </select>
               </label>
               <label class="setting-row select-row">
-                <span>配置基準リング</span>
+                <span>配置基準レイヤー</span>
                 <select v-model="selectedRingAppearance.textReferenceRingId">
-                  <option value="self">この文字リング</option>
+                  <option value="self">この文字レイヤー</option>
                   <option
                     v-for="(ring, index) in draft.rings"
                     :key="ring.id"
@@ -346,7 +356,7 @@
                   >{{ getRingName(ring, index) }}</option>
                 </select>
               </label>
-              <p v-if="selectedRingAppearance.textReferenceRingId !== 'self'" class="setting-hint">選択したリングの形・縦横比・角度・位置に文字を合わせます。</p>
+              <p v-if="selectedRingAppearance.textReferenceRingId !== 'self'" class="setting-hint">選択したレイヤーの形・縦横比・角度・位置に文字を合わせます。</p>
               <label v-if="selectedRingAppearance.textReferenceRingId !== 'self'" class="setting-row">
                 <span>基準からの大きさ</span>
                 <input v-model.number="selectedRingAppearance.textReferenceScale" type="range" min="50" max="160" step="1" />
@@ -519,7 +529,21 @@
                 <input v-model.number="selectedRingAppearance.fillOpacity" type="range" min="0" max="100" step="1" />
                 <output>{{ selectedRingAppearance.fillOpacity }}%</output>
               </label>
+              <label v-if="selectedRingSupportsCutout" class="toggle-row">
+                <input v-model="selectedRingAppearance.cutoutEnabled" type="checkbox" />
+                <span>内側をくり抜く</span>
+              </label>
+              <label v-if="selectedRingSupportsCutout && selectedRingAppearance.cutoutEnabled" class="setting-row">
+                <span>くり抜きサイズ</span>
+                <input v-model.number="selectedRingAppearance.cutoutSize" type="range" min="10" max="90" step="1" />
+                <output>{{ selectedRingAppearance.cutoutSize }}%</output>
+              </label>
             </template>
+            <label v-if="selectedRingSupportsLayerErase" class="toggle-row layer-erase-toggle">
+              <input v-model="selectedRingAppearance.eraseBelow" type="checkbox" />
+              <span>形状の内側で下層レイヤーを透明化</span>
+            </label>
+            <p v-if="selectedRingAppearance.eraseBelow" class="setting-hint">このレイヤーより描画順が下のマーカーだけを切り抜きます。背景とキャラクターは穴から表示されます。</p>
             <label v-if="['circumference', 'textRing'].includes(selectedRingAppearance.renderMode) && selectedRingItemCount > 1" class="toggle-row">
               <input v-model="selectedRingAppearance.useSegmentColors" type="checkbox" />
               <span>分割片ごとに色を設定</span>
@@ -532,10 +556,10 @@
             </div>
             <details class="ring-advanced-settings">
               <summary>詳細設定</summary>
-              <p>このリングだけに適用する名前、位置、反転、重なり方、線の見た目を設定します。</p>
+              <p>このレイヤーだけに適用する名前、位置、反転、重なり方、線の見た目を設定します。</p>
               <label class="setting-row text-setting-row">
-                <span>リング名</span>
-                <input v-model="selectedRing.name" class="text-value-input" type="text" maxlength="20" placeholder="リング名" />
+                <span>レイヤー名</span>
+                <input v-model="selectedRing.name" class="text-value-input" type="text" maxlength="20" :placeholder="shapeLabel(selectedRingAppearance.shape)" />
               </label>
               <label class="setting-row">
                 <span>横位置</span>
@@ -601,7 +625,7 @@
             </details>
             <label class="toggle-row">
               <input v-model="selectedRingAppearance.visible" type="checkbox" />
-              <span>このリングを表示</span>
+              <span>このレイヤーを表示</span>
             </label>
             <button
               type="button"
@@ -609,13 +633,13 @@
               :disabled="draft.rings.length <= 1"
               @click="removeSelectedRing"
             >
-              選択中のリングを削除
+              選択中のレイヤーを削除
             </button>
           </template>
 
           <template v-else-if="activeSection === 'motion'">
             <h3>動き</h3>
-            <p>リング {{ selectedRingIndex + 1 }} の停止時と移動時を個別に設定します。</p>
+            <p>レイヤー {{ selectedRingIndex + 1 }} の停止時と移動時を個別に設定します。</p>
             <label class="toggle-row state-enabled-toggle">
               <input v-model="selectedMotion.enabled" type="checkbox" />
               <span>この状態でアニメーションする</span>
@@ -813,6 +837,10 @@ const makeRingAppearance = overrides => ({
   fillEnabled: false,
   fillColor: '#8fefff',
   fillOpacity: 30,
+  cutoutEnabled: false,
+  cutoutSize: 62,
+  moonPhase: 78,
+  eraseBelow: false,
   useSegmentColors: false,
   segmentColors: Array(TEXT_ITEM_LIMIT).fill('#8fefff'),
   zIndex: 0,
@@ -941,7 +969,7 @@ onBeforeUnmount(() => {
 
 const makeRing = index => ({
   id: `ring-${Date.now()}-${index}`,
-  name: `リング ${index}`,
+  name: '',
   appearance: {
     idle: makeRingAppearance({ width: Math.max(20, 100 - index * 14), height: Math.max(20, 100 - index * 14) }),
     moving: makeRingAppearance({ width: Math.max(20, 100 - index * 14), height: Math.max(20, 100 - index * 14) })
@@ -1010,6 +1038,10 @@ const normalizeRingAppearance = ring => {
     fillEnabled: ring.fillEnabled === true,
     fillColor: ring.fillColor || ring.color || '#8fefff',
     fillOpacity: Number(ring.fillOpacity) || 30,
+    cutoutEnabled: ring.cutoutEnabled === true,
+    cutoutSize: Math.min(90, Math.max(10, Number(ring.cutoutSize) || 62)),
+    moonPhase: Math.min(100, Math.max(0, Number.isFinite(Number(ring.moonPhase)) ? Number(ring.moonPhase) : 78)),
+    eraseBelow: ring.eraseBelow === true,
     useSegmentColors: ring.useSegmentColors === true,
     segmentColors: Array.from({ length: TEXT_ITEM_LIMIT }, (_, index) => ring.segmentColors?.[index] || ring.color || '#8fefff'),
     textMode: ring.textMode === 'labels' ? 'labels' : 'string',
@@ -1112,6 +1144,13 @@ const readMarkerLibrary = () => {
   }
 }
 const savedMarkers = ref(readMarkerLibrary())
+const remainingMarkerSlots = computed(() => Math.max(0, MAX_SAVED_MARKERS - savedMarkers.value.length))
+const markerLibrarySizeLabel = computed(() => {
+  const bytes = new TextEncoder().encode(JSON.stringify(savedMarkers.value)).length
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
+  return `${(bytes / 1024 / 1024).toFixed(2)} MB`
+})
 const selectedSavedMarkerId = ref(null)
 const libraryName = ref('')
 const libraryNotice = ref('')
@@ -1123,6 +1162,12 @@ const selectedRingIndex = computed(() => Math.max(0, draft.value.rings.findIndex
 const selectedRing = computed(() => draft.value.rings[selectedRingIndex.value])
 const selectedOverall = computed(() => draft.value.appearance[editingState.value])
 const selectedRingAppearance = computed(() => selectedRing.value.appearance[editingState.value])
+const CUTOUT_SHAPES = new Set(['circle', 'point', 'square', 'triangle', 'diamond', 'star', 'hexagram', 'octagram', 'sparkle', 'arrow', 'arrowhead', 'sector', 'moon', 'heart', 'sun'])
+const selectedRingSupportsCutout = computed(() => CUTOUT_SHAPES.has(selectedRingAppearance.value.shape))
+const selectedRingSupportsLayerErase = computed(() => (
+  CUTOUT_SHAPES.has(selectedRingAppearance.value.shape)
+  && ['continuous', 'free', 'center'].includes(selectedRingAppearance.value.renderMode)
+))
 const selectedMotion = computed(() => selectedRing.value.motion[editingState.value])
 const selectedRingItemCount = computed(() => {
   const appearance = selectedRingAppearance.value
@@ -1134,7 +1179,25 @@ const selectedRingItemCount = computed(() => {
   return Math.min(8, Math.max(1, Number(appearance.splitCount) || 1))
 })
 const getRingAppearance = ring => ring.appearance[editingState.value]
-const getRingName = (ring, index) => ring.name?.trim() || `リング ${index + 1}`
+const getRingBaseName = (ring, index) => {
+  const name = ring.name?.trim() || ''
+  const isGeneratedName = /^リング\s*\d+$/.test(name)
+  if (name && !isGeneratedName) return name
+  const shape = ring.appearance?.idle?.shape || ring.shape || 'circle'
+  return shapeLabel(shape) || `レイヤー ${index + 1}`
+}
+const getRingName = (ring, index) => {
+  const baseName = getRingBaseName(ring, index)
+  const matchingRings = draft.value.rings.filter((candidate, candidateIndex) => (
+    getRingBaseName(candidate, candidateIndex) === baseName
+  ))
+  if (matchingRings.length <= 1) return baseName
+  const occurrence = draft.value.rings
+    .slice(0, index + 1)
+    .filter((candidate, candidateIndex) => getRingBaseName(candidate, candidateIndex) === baseName)
+    .length
+  return `${baseName} ${occurrence}`
+}
 const selectRing = ringId => {
   selectedRingId.value = ringId
   highlightedRingId.value = null
@@ -1283,6 +1346,13 @@ const requestOverallShapeChange = shape => {
   pendingOverallShape.value = shape
 }
 const shapeLabel = shapeKey => shapes.find(shape => shape.key === shapeKey)?.label || shapeKey
+const moonPhaseLabel = value => {
+  const phase = Number(value) || 0
+  if (phase <= 8) return '満月'
+  if (phase <= 42) return '欠け始め'
+  if (phase <= 68) return '半月'
+  return '三日月'
+}
 const confirmOverallShapeChange = () => {
   if (!pendingOverallShape.value) return
   setOverallShape(pendingOverallShape.value)
@@ -1340,7 +1410,7 @@ const previewBackgroundStyle = computed(() => ({
 }))
 
 const sections = [
-  { key: 'rings', label: 'リング' },
+  { key: 'rings', label: 'レイヤー' },
   { key: 'motion', label: '動き' },
   { key: 'overall', label: '全体設定' },
   { key: 'display', label: '表示設定' },
@@ -1364,6 +1434,9 @@ const shapes = [
   { key: 'hexagram', label: '六芒星' },
   { key: 'octagram', label: '八芒星' },
   { key: 'sparkle', label: '十字星' },
+  { key: 'moon', label: '月' },
+  { key: 'heart', label: 'ハート' },
+  { key: 'sun', label: '太陽' },
   { key: 'arrow', label: '矢印 ⇒' },
   { key: 'arrowhead', label: '矢じり ➤' },
   { key: 'sector', label: '扇形' },
@@ -1372,7 +1445,7 @@ const shapes = [
 ]
 
 const renderModes = [
-  { key: 'continuous', label: '連続リング', description: '中心を基準に、切れ目のない形を1つ描画します。' },
+  { key: 'continuous', label: '単体形状', description: '中心を基準に、円や模様などの形を1つ描画します。' },
   { key: 'segmentedArc', label: '分割円弧', description: '1本の円周を指定数の円弧へ均等に分割します。' },
   { key: 'circumference', label: '円周配置', description: '同じ部品を中心点の周囲へ均等に配置します。' },
   { key: 'free', label: '自由配置', description: '中心からXY位置をずらして部品を配置します。' },
@@ -2368,6 +2441,22 @@ p { margin-top: 8px; color: rgba(200, 240, 250, 0.72); font-size: 20px; line-hei
   margin-top: 18px;
   font-size: 20px;
 }
+.library-storage-status {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 12px;
+}
+.library-storage-status span {
+  display: grid;
+  gap: 3px;
+  padding: 8px 10px;
+  border: 1px solid rgba(126, 224, 245, 0.3);
+  background: rgba(5, 24, 35, 0.72);
+  color: rgba(201, 248, 255, 0.68);
+  font-size: 16px;
+}
+.library-storage-status strong { color: #e8fb9b; font-size: 20px; }
 .library-name-row input {
   min-width: 0;
   border: 1px solid rgba(126, 224, 245, 0.5);
