@@ -14,6 +14,7 @@
         :class="{ 'preview-fullscreen-mode': previewFullscreen, 'mobile-layout': mobileLayout }"
         :style="mobileLayoutStyle"
         @click.capture="openRangeEditorFromEvent"
+        @pointerdown.capture="guardMobileRangePointerDown"
       >
       <header class="modal-header">
         <div>
@@ -1347,6 +1348,23 @@ const adjustRangeEditor = direction => {
 const closeRangeEditor = () => {
   rangeEditorOpen.value = false
   rangeEditorTarget = null
+}
+const guardMobileRangePointerDown = event => {
+  if (!mobileLayout.value || event.button > 0) return
+  const input = event.target
+  if (!(input instanceof HTMLInputElement) || input.type !== 'range' || input.disabled) return
+
+  const rect = input.getBoundingClientRect()
+  const min = Number(input.min || 0)
+  const max = Number(input.max || 100)
+  const value = Number(input.value)
+  const ratio = max > min ? Math.min(1, Math.max(0, (value - min) / (max - min))) : 0
+  const thumbCenterX = rect.left + rect.width * ratio
+  const thumbHitRadius = 24
+
+  if (Math.abs(event.clientX - thumbCenterX) <= thumbHitRadius) return
+  event.preventDefault()
+  event.stopPropagation()
 }
 const openRangeEditorFromEvent = event => {
   if (!mobileLayout.value || rangeEditorOpen.value) return
