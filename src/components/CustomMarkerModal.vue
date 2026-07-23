@@ -3659,6 +3659,9 @@ p { margin-top: 8px; color: rgba(200, 240, 250, 0.72); font-size: 20px; line-hei
     min-height: 40px;
     touch-action: pan-y;
   }
+  .mobile-layout .setting-content .setting-row input[type='range'] {
+    pointer-events: none;
+  }
   .setting-row input[type='range']::-webkit-slider-runnable-track {
     height: 10px;
     border-radius: 999px;
