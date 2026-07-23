@@ -2762,6 +2762,7 @@ p { margin-top: 8px; color: rgba(200, 240, 250, 0.72); font-size: 20px; line-hei
   position: relative;
   display: grid;
   place-items: center;
+  contain: layout paint;
   height: 360px;
   overflow: hidden;
   border: 1px solid rgba(116, 220, 245, 0.3);
@@ -3017,6 +3018,7 @@ p { margin-top: 8px; color: rgba(200, 240, 250, 0.72); font-size: 20px; line-hei
   min-width: 0;
   padding: 16px;
   overflow-y: auto;
+  contain: layout paint;
 }
 .render-mode-select {
   margin-top: 0;
