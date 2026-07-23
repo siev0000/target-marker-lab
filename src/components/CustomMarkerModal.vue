@@ -3539,22 +3539,32 @@ p { margin-top: 8px; color: rgba(200, 240, 250, 0.72); font-size: 20px; line-hei
   .mobile-layout .preview-controls > span { padding: 5px 7px; }
   .mobile-layout .preview-controls button { min-height: 36px; padding: 5px 8px; }
   .editor-layout {
-    grid-template-columns: minmax(0, 1fr);
-    grid-template-rows: auto auto minmax(0, 1fr);
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-rows: auto minmax(0, 1fr);
   }
   .editor-state-tabs {
     grid-column: 1;
     grid-row: 1;
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 5px;
-    padding: 6px;
+    gap: 0;
+    padding: 5px 3px 5px 5px;
+    border-right: 1px solid rgba(116, 220, 245, 0.22);
   }
   .editor-state-tabs > span { display: none; }
   .editor-state-tabs button {
     min-width: 0;
-    min-height: 44px;
-    padding: 6px 8px;
+    min-height: 36px;
+    min-width: 0;
+    padding: 4px 5px;
+    border-color: rgba(126, 224, 245, 0.3);
+    border-radius: 0;
+    font-size: 14px;
+  }
+  .editor-state-tabs button:first-of-type { border-radius: 999px 0 0 999px; }
+  .editor-state-tabs button:nth-of-type(2) {
+    margin-left: -1px;
+    border-radius: 0 999px 999px 0;
   }
   .editor-state-tabs .state-copy-button { display: none; }
   .mobile-layout .ring-tabs,
@@ -3563,21 +3573,28 @@ p { margin-top: 8px; color: rgba(200, 240, 250, 0.72); font-size: 20px; line-hei
   }
   .mobile-setting-list {
     display: grid;
-    grid-column: 1;
-    grid-row: 2;
+    grid-column: 2;
+    grid-row: 1;
     grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 5px;
-    padding: 6px;
+    gap: 0;
+    padding: 5px 5px 5px 3px;
     border-bottom: 1px solid rgba(116, 220, 245, 0.3);
     background: rgba(3, 14, 24, 0.78);
   }
   .mobile-setting-list button {
-    min-height: 44px;
-    padding: 6px 4px;
+    min-height: 36px;
+    padding: 4px 3px;
     border: 1px solid rgba(126, 224, 245, 0.32);
+    border-radius: 0;
     background: rgba(5, 23, 34, 0.78);
     color: rgba(215, 247, 255, 0.76);
+    font-size: 14px;
     white-space: normal;
+  }
+  .mobile-setting-list button:first-child { border-radius: 999px 0 0 999px; }
+  .mobile-setting-list button:last-child {
+    margin-left: -1px;
+    border-radius: 0 999px 999px 0;
   }
   .mobile-setting-list button.active {
     border-color: #c4faff;
@@ -3586,8 +3603,8 @@ p { margin-top: 8px; color: rgba(200, 240, 250, 0.72); font-size: 20px; line-hei
     box-shadow: inset 0 3px 0 #8fefff;
   }
   .setting-content {
-    grid-column: 1;
-    grid-row: 3;
+    grid-column: 1 / -1;
+    grid-row: 2;
     padding: 10px 10px 10px 46px;
   }
   .render-mode-grid { grid-template-columns: 1fr; }
