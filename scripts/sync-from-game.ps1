@@ -6,8 +6,18 @@ $gameRoot = Join-Path (Split-Path -Parent $labRoot) 'game-project'
 $sources = @{
   'src/components/modals/robot/TargetMarker.vue' = 'src/components/TargetMarker.vue'
   'src/components/modals/robot/CustomMarkerModal.vue' = 'src/components/CustomMarkerModal.vue'
+  'src/components/modals/robot/FontSelectModal.vue' = 'src/components/FontSelectModal.vue'
   'src/components/modals/robot/BaseHudModal.vue' = 'src/components/BaseHudModal.vue'
+  'src/components/modals/data/textFontPresets.js' = 'src/data/textFontPresets.js'
   'src/components/useScale.js' = 'src/useScale.js'
+  'src/assets/fonts/markerFonts.css' = 'src/assets/fonts/markerFonts.css'
+  'src/assets/fonts/magic-ring.ttf' = 'src/assets/fonts/magic-ring.ttf'
+  'src/assets/fonts/alien-script.ttf' = 'src/assets/fonts/alien-script.ttf'
+  'src/assets/fonts/isekai-Regular.otf' = 'src/assets/fonts/isekai-Regular.otf'
+  'src/assets/fonts/Neko_no_Mezame.ttf' = 'src/assets/fonts/Neko_no_Mezame.ttf'
+  'src/assets/fonts/TECHNOID.TTF' = 'src/assets/fonts/TECHNOID.TTF'
+  'src/assets/fonts/TechVermin-Regular.otf' = 'src/assets/fonts/TechVermin-Regular.otf'
+  'src/assets/fonts/TechVermin-Italic.otf' = 'src/assets/fonts/TechVermin-Italic.otf'
 }
 
 foreach ($entry in $sources.GetEnumerator()) {
@@ -17,6 +27,7 @@ foreach ($entry in $sources.GetEnumerator()) {
     throw "Source file was not found: $source"
   }
 
+  New-Item -ItemType Directory -Path (Split-Path -Parent $destination) -Force | Out-Null
   Copy-Item -LiteralPath $source -Destination $destination -Force
   Write-Host "Copied $($entry.Key)"
 }
@@ -55,5 +66,12 @@ $modalPath = Join-Path $labRoot 'src/components/CustomMarkerModal.vue'
 $modal = [System.IO.File]::ReadAllText($modalPath, $utf8)
 $modal = $modal -replace "@/components/useScale\.js", '../useScale.js'
 [System.IO.File]::WriteAllText($modalPath, $modal, $utf8)
+
+$mainPath = Join-Path $labRoot 'src/main.js'
+$main = [System.IO.File]::ReadAllText($mainPath, $utf8)
+if ($main -notmatch "assets/fonts/markerFonts\.css") {
+  $main = $main -replace "import './style\.css'", "import './style.css'`r`nimport './assets/fonts/markerFonts.css'"
+  [System.IO.File]::WriteAllText($mainPath, $main, $utf8)
+}
 
 Write-Host 'Removed game-only imports and adjusted standalone paths.'

@@ -447,7 +447,7 @@
                 <output>{{ selectedRingAppearance.gearInnerSize }}%</output>
               </label>
             </template>
-            <label class="setting-row">
+            <label v-if="selectedRingAppearance.renderMode !== 'textRing'" class="setting-row">
               <span>色</span>
               <input v-model="selectedRingAppearance.color" type="color" />
               <code>{{ selectedRingAppearance.color }}</code>
@@ -480,9 +480,58 @@
                   <option value="labels">個別ラベル</option>
                 </select>
               </label>
+              <div class="setting-row font-picker-row">
+                <span>フォント</span>
+                <button type="button" class="font-picker-trigger" @click="fontPickerOpen = true">
+                  <strong>{{ selectedTextFontLabel }}</strong>
+                  <span :style="{ fontFamily: selectedTextFontFamily }">魔法陣 TARGET 123</span>
+                </button>
+              </div>
+              <label v-if="selectedRingAppearance.textFontPreset === 'custom'" class="setting-row text-setting-row">
+                <span>カスタムフォント</span>
+                <input
+                  v-model="selectedRingAppearance.textCustomFontFamily"
+                  type="text"
+                  maxlength="120"
+                  placeholder='例: "Cinzel Decorative", serif'
+                />
+              </label>
+              <div class="text-quick-settings">
+                <label class="text-quick-color">
+                  <span>色</span>
+                  <input v-model="selectedRingAppearance.color" type="color" />
+                  <code>{{ selectedRingAppearance.color }}</code>
+                </label>
+                <label class="text-quick-size setting-row">
+                  <span>文字サイズ</span>
+                  <input v-model.number="selectedRingAppearance.textSize" type="range" min="6" max="40" step="1" />
+                  <output>{{ selectedRingAppearance.textSize }}px</output>
+                </label>
+                <label class="text-quick-bold">
+                  <input
+                    type="checkbox"
+                    :checked="selectedRingAppearance.textWeight === 'bold'"
+                    @change="selectedRingAppearance.textWeight = $event.target.checked ? 'bold' : 'normal'"
+                  />
+                  <span>太字</span>
+                </label>
+              </div>
               <label v-if="selectedRingAppearance.textMode === 'string'" class="setting-row text-setting-row">
                 <span>文字列</span>
-                <input v-model="selectedRingAppearance.textContent" class="text-value-input" type="text" maxlength="64" placeholder="TARGET LOCKED" />
+                <input
+                  v-model="selectedRingAppearance.textContent"
+                  class="text-value-input"
+                  type="text"
+                  maxlength="64"
+                  :placeholder="isRuneFontPreset(selectedRingAppearance.textFontPreset) ? 'ᚠᚢᚦᚨᚱᚲ' : 'TARGET LOCKED'"
+                  @input="sanitizeSelectedTextContent"
+                />
+                <button
+                  v-if="isRuneFontPreset(selectedRingAppearance.textFontPreset)"
+                  type="button"
+                  class="rune-input-button"
+                  @click="openRuneEditor('text')"
+                >ルーン入力</button>
                 <output>{{ countTextCharacters(selectedRingAppearance.textContent) }}/64</output>
               </label>
               <label v-if="selectedRingAppearance.textMode === 'string'" class="setting-row">
@@ -494,8 +543,20 @@
               <div v-if="selectedRingAppearance.textMode === 'labels'" class="segment-label-grid">
                 <label v-for="index in selectedRingItemCount" :key="index">
                   <span>{{ index }}</span>
-                  <input v-model="selectedRingAppearance.segmentLabels[index - 1]" type="text" maxlength="8" />
-                </label>
+                    <input
+                      v-model="selectedRingAppearance.segmentLabels[index - 1]"
+                      type="text"
+                      maxlength="8"
+                      :placeholder="isRuneFontPreset(selectedRingAppearance.textFontPreset) ? 'ᚠᚢᚦ' : ''"
+                      @input="sanitizeSegmentLabel(index - 1, $event)"
+                    />
+                    <button
+                      v-if="isRuneFontPreset(selectedRingAppearance.textFontPreset)"
+                      type="button"
+                      class="rune-input-button rune-label-input-button"
+                      @click="openRuneEditor('label', index - 1)"
+                    >入力</button>
+                  </label>
               </div>
               <label class="setting-row select-row">
                 <span>文字の配置</span>
@@ -546,18 +607,6 @@
                 <span>{{ selectedRingAppearance.textLayout === 'shape' ? '開始位置' : '開始角度' }}</span>
                 <input v-model.number="selectedRingAppearance.arcAngle" type="range" min="0" max="359" step="1" />
                 <output>{{ selectedRingAppearance.textLayout === 'shape' ? Math.round(selectedRingAppearance.arcAngle / 359 * 100) + '%' : selectedRingAppearance.arcAngle + '°' }}</output>
-              </label>
-              <label class="setting-row">
-                <span>文字サイズ</span>
-                <input v-model.number="selectedRingAppearance.textSize" type="range" min="6" max="40" step="1" />
-                <output>{{ selectedRingAppearance.textSize }}px</output>
-              </label>
-              <label class="setting-row select-row">
-                <span>文字の太さ</span>
-                <select v-model="selectedRingAppearance.textWeight">
-                  <option value="normal">標準</option>
-                  <option value="bold">太字</option>
-                </select>
               </label>
               <label class="setting-row select-row">
                 <span>配置方向</span>
@@ -1069,10 +1118,16 @@
               <span>数値調整</span>
               <strong>{{ rangeEditorLabel }}</strong>
             </div>
-            <button type="button" @click="closeRangeEditor">閉じる</button>
           </header>
           <div class="range-editor-stepper">
-            <button type="button" aria-label="値を下げる" @click="adjustRangeEditor(-1)">－</button>
+            <button
+              type="button"
+              aria-label="値を下げる"
+              @click="handleRangeAdjustClick(-1)"
+              @pointerdown="startRangeAdjustHold(-1, $event)"
+              @pointerup="stopRangeAdjustHold"
+              @pointercancel="stopRangeAdjustHold"
+            >－</button>
             <label>
               <input
                 :value="rangeEditorValue"
@@ -1085,7 +1140,14 @@
               />
               <span>{{ rangeEditorUnit }}</span>
             </label>
-            <button type="button" aria-label="値を上げる" @click="adjustRangeEditor(1)">＋</button>
+            <button
+              type="button"
+              aria-label="値を上げる"
+              @click="handleRangeAdjustClick(1)"
+              @pointerdown="startRangeAdjustHold(1, $event)"
+              @pointerup="stopRangeAdjustHold"
+              @pointercancel="stopRangeAdjustHold"
+            >＋</button>
           </div>
           <input
             class="range-editor-slider"
@@ -1104,6 +1166,42 @@
       </div>
       </div>
     </BaseHudModal>
+    <BaseHudModal
+      v-if="runeEditorOpen"
+      frame-width="min(620px, calc(100vw - 20px))"
+      frame-height="min(720px, calc(100dvh - 20px))"
+      frame-max-height="none"
+      :close-on-overlay="false"
+      @close="closeRuneEditor"
+    >
+      <div class="rune-editor-modal">
+        <header class="rune-editor-header">
+          <div>
+            <span class="modal-kicker">RUNE INPUT</span>
+            <h2>ルーン文字入力</h2>
+          </div>
+          <button type="button" @click="closeRuneEditor">閉じる</button>
+        </header>
+        <p class="rune-editor-note">キーボード入力の代わりに文字を選択してください。閉じると現在の入力内容が反映されます。</p>
+        <output class="rune-editor-value">{{ runeEditorText }}</output>
+        <div class="rune-key-grid" aria-label="ルーン文字一覧">
+          <button v-for="rune in runeKeyboard" :key="rune" type="button" @click="appendRuneCharacter(rune)">{{ rune }}</button>
+          <button type="button" @click="appendRuneCharacter(' ')">空白</button>
+        </div>
+        <div class="rune-editor-actions">
+          <button type="button" @click="removeRuneCharacter">1文字削除</button>
+          <button type="button" @click="clearRuneEditor">クリア</button>
+          <button type="button" @click="setRuneSample">サンプル</button>
+        </div>
+      </div>
+    </BaseHudModal>
+    <FontSelectModal
+      v-if="fontPickerOpen"
+      :selected-key="selectedRingAppearance.textFontPreset"
+      :custom-family="selectedRingAppearance.textCustomFontFamily"
+      @close="fontPickerOpen = false"
+      @select="selectTextFont"
+    />
   </Teleport>
 </template>
 
@@ -1111,7 +1209,9 @@
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { getCurrentScale } from '../useScale.js'
 import BaseHudModal from './BaseHudModal.vue'
+import FontSelectModal from './FontSelectModal.vue'
 import TargetMarker from './TargetMarker.vue'
+import { TEXT_FONT_PRESETS, VISIBLE_TEXT_FONT_PRESETS } from '../data/textFontPresets.js'
 import magicCircleExport from '../data/targetMarkerPresets/magic-circle.json'
 import symbolMagicCircleExport from '../data/targetMarkerPresets/symbol-magic-circle.json'
 
@@ -1227,6 +1327,8 @@ const makeRingAppearance = overrides => ({
   textEvenSpacing: false,
   textArcSpread: 360,
   textSize: 14,
+  textFontPreset: 'cyber',
+  textCustomFontFamily: '',
   textWeight: 'bold',
   textDirection: 'clockwise',
   textOrientation: 'outward',
@@ -1306,6 +1408,11 @@ const rangeEditorMin = ref(0)
 const rangeEditorMax = ref(100)
 const rangeEditorStep = ref(1)
 const rangeEditorUnit = ref('')
+const runeEditorOpen = ref(false)
+const fontPickerOpen = ref(false)
+const runeEditorText = ref('')
+const runeEditorTarget = ref(null)
+const runeKeyboard = Array.from('ᚠᚢᚦᚨᚱᚲᚷᚹᚺᚾᛁᛃᛇᛈᛉᛊᛏᛒᛖᛗᛚᛜᛞᛟᚩᚪᚫᚣᚤᚥᚸᛋᛝ')
 let rangeEditorTarget = null
 let previewMoveTimer = null
 let previewMoveToken = 0
@@ -1316,6 +1423,9 @@ let previewCursorTarget = { x: 50, y: 50 }
 let layerLongPressTimer = null
 let layerLongPressStart = null
 let layerLongPressTriggered = false
+let rangeAdjustHoldTimer = null
+let rangeAdjustRepeatTimer = null
+let rangeAdjustRepeated = false
 const getRangePrecision = step => {
   const stepText = String(step)
   return stepText.includes('.') ? stepText.split('.')[1].length : 0
@@ -1345,7 +1455,32 @@ const setRangeEditorValue = value => {
 const adjustRangeEditor = direction => {
   setRangeEditorValue(Number(rangeEditorValue.value) + Number(direction) * Number(rangeEditorStep.value))
 }
+const stopRangeAdjustHold = () => {
+  if (rangeAdjustHoldTimer) clearTimeout(rangeAdjustHoldTimer)
+  if (rangeAdjustRepeatTimer) clearInterval(rangeAdjustRepeatTimer)
+  rangeAdjustHoldTimer = null
+  rangeAdjustRepeatTimer = null
+}
+const startRangeAdjustHold = (direction, event) => {
+  stopRangeAdjustHold()
+  rangeAdjustRepeated = false
+  event.currentTarget?.setPointerCapture?.(event.pointerId)
+  rangeAdjustHoldTimer = setTimeout(() => {
+    rangeAdjustRepeated = true
+    adjustRangeEditor(direction)
+    rangeAdjustRepeatTimer = setInterval(() => adjustRangeEditor(direction), 80)
+  }, 360)
+}
+const handleRangeAdjustClick = direction => {
+  stopRangeAdjustHold()
+  if (rangeAdjustRepeated) {
+    rangeAdjustRepeated = false
+    return
+  }
+  adjustRangeEditor(direction)
+}
 const closeRangeEditor = () => {
+  stopRangeAdjustHold()
   rangeEditorOpen.value = false
   rangeEditorTarget = null
 }
@@ -1427,6 +1562,7 @@ onBeforeUnmount(() => {
   if (ringHighlightTimer) clearTimeout(ringHighlightTimer)
   if (previewCursorAnimationFrame != null) cancelAnimationFrame(previewCursorAnimationFrame)
   if (layerLongPressTimer) clearTimeout(layerLongPressTimer)
+  stopRangeAdjustHold()
 })
 
 const makeRing = index => ({
@@ -1537,6 +1673,8 @@ const normalizeRingAppearance = ring => {
     textEvenSpacing: ring.textEvenSpacing === true,
     textArcSpread: Number(ring.textArcSpread) || 360,
     textSize: Number(ring.textSize) || 14,
+    textFontPreset: TEXT_FONT_PRESETS.some(font => font.key === ring.textFontPreset) || ring.textFontPreset === 'custom' ? ring.textFontPreset : 'cyber',
+    textCustomFontFamily: String(ring.textCustomFontFamily || '').slice(0, 120),
     textWeight: ring.textWeight === 'normal' ? 'normal' : 'bold',
     textDirection: ring.textDirection === 'counterclockwise' ? 'counterclockwise' : 'clockwise',
     textOrientation: ['outward', 'inward', 'centerFacing', 'upright', 'tangent'].includes(ring.textOrientation) ? ring.textOrientation : 'outward',
@@ -2074,6 +2212,72 @@ const shapes = [
   { key: 'wave', label: 'G5オービット' },
   { key: 'magitechWave', label: 'G4ウェーブ' }
 ]
+const textFontPresets = [
+  ...VISIBLE_TEXT_FONT_PRESETS,
+  { key: 'custom', label: 'カスタム指定', category: '自由入力' }
+]
+const selectedTextFontLabel = computed(() => (
+  textFontPresets.find(font => font.key === selectedRingAppearance.value.textFontPreset)?.label
+  || 'フォントを選択'
+))
+const selectedTextFontFamily = computed(() => {
+  if (selectedRingAppearance.value.textFontPreset === 'custom') {
+    return selectedRingAppearance.value.textCustomFontFamily || 'inherit'
+  }
+  return textFontPresets.find(font => font.key === selectedRingAppearance.value.textFontPreset)?.family || 'inherit'
+})
+const RUNE_SAMPLE = 'ᚠᚢᚦᚨᚱᚲ'
+const isRuneFontPreset = preset => ['rune', 'runeJs'].includes(preset)
+const sanitizeRuneText = value => Array.from(String(value || ''))
+  .filter(character => /[\u16A0-\u16FF\s]/u.test(character))
+  .join('')
+const onTextFontPresetChange = () => {
+  if (!isRuneFontPreset(selectedRingAppearance.value.textFontPreset)) return
+  const sanitized = sanitizeRuneText(selectedRingAppearance.value.textContent)
+  selectedRingAppearance.value.textContent = sanitized.trim() ? sanitized : RUNE_SAMPLE
+  selectedRingAppearance.value.segmentLabels = selectedRingAppearance.value.segmentLabels.map(label => sanitizeRuneText(label))
+}
+const selectTextFont = key => {
+  selectedRingAppearance.value.textFontPreset = key
+  onTextFontPresetChange()
+  fontPickerOpen.value = false
+}
+const sanitizeSelectedTextContent = event => {
+  if (!isRuneFontPreset(selectedRingAppearance.value.textFontPreset)) return
+  event.target.value = sanitizeRuneText(event.target.value)
+  selectedRingAppearance.value.textContent = event.target.value
+}
+const sanitizeSegmentLabel = (index, event) => {
+  if (!isRuneFontPreset(selectedRingAppearance.value.textFontPreset)) return
+  event.target.value = sanitizeRuneText(event.target.value)
+  selectedRingAppearance.value.segmentLabels[index] = event.target.value
+}
+const openRuneEditor = (target, index = null) => {
+  runeEditorTarget.value = { target, index }
+  runeEditorText.value = target === 'label'
+    ? String(selectedRingAppearance.value.segmentLabels[index] || '')
+    : String(selectedRingAppearance.value.textContent || '')
+  runeEditorOpen.value = true
+}
+const closeRuneEditor = () => {
+  const value = runeEditorText.value
+  if (runeEditorTarget.value?.target === 'label') {
+    selectedRingAppearance.value.segmentLabels[runeEditorTarget.value.index] = value
+  } else if (runeEditorTarget.value?.target === 'text') {
+    selectedRingAppearance.value.textContent = value
+  }
+  runeEditorOpen.value = false
+  runeEditorTarget.value = null
+}
+const appendRuneCharacter = character => {
+  const maxLength = runeEditorTarget.value?.target === 'label' ? 8 : TEXT_ITEM_LIMIT
+  runeEditorText.value = sanitizeRuneText(`${runeEditorText.value}${character}`).slice(0, maxLength)
+}
+const removeRuneCharacter = () => {
+  runeEditorText.value = Array.from(runeEditorText.value).slice(0, -1).join('')
+}
+const clearRuneEditor = () => { runeEditorText.value = '' }
+const setRuneSample = () => { runeEditorText.value = RUNE_SAMPLE }
 
 const renderModes = [
   { key: 'continuous', label: '単体形状', description: '中心を基準に、円や模様などの形を1つ描画します。' },
@@ -3298,6 +3502,37 @@ p { margin-top: 8px; color: rgba(200, 240, 250, 0.72); font-size: 20px; line-hei
 .text-setting-row {
   grid-template-columns: 132px minmax(0, 1fr) auto;
 }
+.font-picker-row { align-items: stretch; }
+.font-picker-trigger {
+  display: grid;
+  grid-column: 2 / 4;
+  grid-template-columns: minmax(120px, auto) minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  min-height: 52px;
+  padding: 6px 10px;
+  border: 1px solid rgba(126, 224, 245, .5);
+  background: rgba(8, 28, 40, .9);
+  color: #d7f7ff;
+  text-align: left;
+}
+.font-picker-trigger strong {
+  overflow: hidden;
+  color: #fff0a8;
+  font-size: 16px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.font-picker-trigger > span {
+  overflow: hidden;
+  color: #e9fdff;
+  font-size: 20px;
+  text-align: center;
+  text-overflow: ellipsis;
+  text-shadow: 0 0 8px rgba(95, 229, 255, .6);
+  white-space: nowrap;
+}
 .text-value-input,
 .segment-label-grid input[type='text'] {
   min-width: 0;
@@ -3358,6 +3593,61 @@ p { margin-top: 8px; color: rgba(200, 240, 250, 0.72); font-size: 20px; line-hei
 
 .toggle-row { display: flex; gap: 9px; align-items: center; margin-top: 18px; font-size: 20px; }
 .toggle-row input[type='checkbox'] { width: 20px; height: 20px; flex: 0 0 20px; }
+.text-quick-settings {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(90px, auto);
+  gap: 10px;
+  align-items: stretch;
+  margin-top: 14px;
+}
+.text-quick-settings > label {
+  min-width: 0;
+  min-height: 48px;
+  padding: 7px 9px;
+  border: 1px solid rgba(126, 224, 245, 0.28);
+  background: rgba(5, 23, 34, 0.72);
+  box-sizing: border-box;
+}
+.text-quick-color {
+  display: grid;
+  grid-template-columns: auto 38px minmax(0, 1fr);
+  gap: 7px;
+  align-items: center;
+}
+.text-quick-color input[type='color'] {
+  width: 38px;
+  height: 30px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+.text-quick-color code {
+  overflow: hidden;
+  color: #9fefff;
+  font-family: inherit;
+  font-size: 13px;
+  text-overflow: ellipsis;
+}
+.text-quick-settings .text-quick-size {
+  grid-column: 1 / -1;
+  grid-template-columns: auto minmax(80px, 1fr) auto;
+  gap: 7px;
+  margin-top: 0;
+  font-size: 16px;
+}
+.text-quick-settings .text-quick-size output { min-width: 48px; }
+.text-quick-bold {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  white-space: nowrap;
+}
+.text-quick-bold input[type='checkbox'] {
+  width: 22px;
+  height: 22px;
+  flex: 0 0 22px;
+}
 .motion-block {
   margin-top: 18px;
   padding: 14px;
@@ -3657,6 +3947,11 @@ p { margin-top: 8px; color: rgba(200, 240, 250, 0.72); font-size: 20px; line-hei
     grid-column: 1 / -1;
     min-height: 44px;
   }
+  .font-picker-trigger {
+    grid-column: 1 / -1;
+    grid-template-columns: minmax(100px, .8fr) minmax(0, 1.2fr);
+    min-height: 48px;
+  }
   .setting-row input[type='range'] {
     min-height: 40px;
     touch-action: pan-y;
@@ -3690,6 +3985,29 @@ p { margin-top: 8px; color: rgba(200, 240, 250, 0.72); font-size: 20px; line-hei
     height: 26px;
     flex-basis: 26px;
   }
+  .text-quick-settings {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: 8px;
+    margin-top: 10px;
+  }
+  .text-quick-settings .text-quick-size {
+    grid-column: 1 / -1;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    gap: 7px;
+    margin-top: 0;
+  }
+  .text-quick-settings .text-quick-size > span:first-child {
+    grid-column: auto;
+  }
+  .text-quick-settings .text-quick-size input[type='range'] {
+    grid-column: auto;
+  }
+  .text-quick-settings .text-quick-size output {
+    grid-column: auto;
+    min-width: 64px;
+  }
+  .text-quick-color,
+  .text-quick-bold { min-height: 48px; }
   .mobile-layout .modal-footer { display: none; }
 
   .mobile-layer-trigger {
@@ -3908,5 +4226,71 @@ p { margin-top: 8px; color: rgba(200, 240, 250, 0.72); font-size: 20px; line-hei
     color: rgba(200, 240, 250, 0.62);
     font-size: 12px;
   }
+}
+
+.rune-input-button {
+  min-height: 32px;
+  padding: 4px 9px;
+  border: 1px solid rgba(255, 240, 168, .55);
+  color: #fff0a8;
+  background: rgba(78, 65, 22, .72);
+  white-space: nowrap;
+}
+.rune-label-input-button { min-height: 28px; font-size: 12px; }
+.rune-editor-modal {
+  display: grid;
+  gap: 14px;
+  height: 100%;
+  padding: 18px;
+  box-sizing: border-box;
+  color: #d7f7ff;
+  background: linear-gradient(135deg, rgba(3, 19, 29, .99), rgba(7, 39, 52, .98));
+}
+.rune-editor-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.rune-editor-header h2 { margin: 4px 0 0; font-size: 24px; }
+.rune-editor-note { margin: 0; color: rgba(200, 240, 250, .72); font-size: 14px; }
+.rune-editor-value {
+  display: block;
+  min-height: 66px;
+  padding: 12px;
+  overflow-wrap: anywhere;
+  border: 1px solid rgba(126, 224, 245, .42);
+  color: #fff0a8;
+  background: rgba(2, 14, 23, .9);
+  font-family: 'Alien Script', serif;
+  font-size: 30px;
+  line-height: 1.35;
+  white-space: pre-wrap;
+}
+.rune-key-grid {
+  display: grid;
+  grid-template-columns: repeat(8, minmax(0, 1fr));
+  gap: 7px;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 2px;
+}
+.rune-key-grid button {
+  min-height: 46px;
+  padding: 4px;
+  border: 1px solid rgba(126, 224, 245, .36);
+  color: #e9fdff;
+  background: rgba(8, 28, 40, .9);
+  font-family: 'Alien Script', serif;
+  font-size: 24px;
+}
+.rune-key-grid button:hover,
+.rune-key-grid button:focus-visible { border-color: #fff0a8; background: rgba(34, 112, 134, .76); }
+.rune-editor-actions { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+.rune-editor-actions button { min-height: 44px; }
+.rune-editor-actions .primary-action { border-color: #c4faff; background: rgba(34, 112, 134, .84); }
+@media (max-width: 560px) {
+  .rune-key-grid { grid-template-columns: repeat(6, minmax(0, 1fr)); }
+  .rune-editor-actions { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 </style>

@@ -342,6 +342,7 @@
 
 <script setup>
 import { computed, onBeforeUnmount, onMounted, ref, useId } from 'vue'
+import { TEXT_FONT_FAMILY_MAP } from '../data/textFontPresets.js'
 
 const props = defineProps({
   generation: {
@@ -999,6 +1000,9 @@ const getCustomTextItemStyle = (ring, index) => {
         : radialAngle + 90
   const fontSize = Math.min(40, Math.max(6, Number(ring.textSize) || 14))
   const fontWeight = ['normal', 'bold'].includes(ring.textWeight) ? ring.textWeight : 'bold'
+  const fontFamily = ring.textFontPreset === 'custom' && String(ring.textCustomFontFamily || '').trim()
+    ? String(ring.textCustomFontFamily).trim()
+    : TEXT_FONT_FAMILY_MAP[ring.textFontPreset] || TEXT_FONT_FAMILY_MAP.cyber
 
   return {
     ...getCustomSegmentVisualStyle(ring, index),
@@ -1009,7 +1013,8 @@ const getCustomTextItemStyle = (ring, index) => {
     translate: '-50% -50%',
     rotate: `${textAngle}deg`,
     fontSize: `${fontSize}px`,
-    fontWeight
+    fontWeight,
+    fontFamily
   }
 }
 const getCustomRingSegmentStyle = (ring, index) => {
