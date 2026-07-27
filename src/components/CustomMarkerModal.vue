@@ -23,6 +23,10 @@
           <h2 v-if="!mobileLayout">作成</h2>
         </div>
         <div class="header-actions">
+          <div v-if="mobileLayout" class="mobile-history-actions" aria-label="変更履歴">
+            <button type="button" :disabled="!canUndoDraft" aria-label="変更を戻る" @click="undoDraftChange">↶ 戻る</button>
+            <button type="button" :disabled="!canRedoDraft" aria-label="変更を進む" @click="redoDraftChange">進む ↷</button>
+          </div>
           <button
             v-if="mobileLayout"
             type="button"
@@ -88,6 +92,10 @@
             <option v-for="state in copyDestinationOptions" :key="state.key" :value="state.key">{{ state.label }}へ</option>
           </select>
           <button type="button" class="state-copy-button" @click="copyEditingStateTo(copyDestinationState)">コピー</button>
+          <div v-if="!mobileLayout" class="desktop-history-actions" aria-label="変更履歴">
+            <button type="button" :disabled="!canUndoDraft" @click="undoDraftChange">↶ 戻る</button>
+            <button type="button" :disabled="!canRedoDraft" @click="redoDraftChange">進む ↷</button>
+          </div>
         </div>
         <div class="ring-tabs" aria-label="編集するレイヤー">
           <div class="ring-tabs-header">
@@ -156,7 +164,9 @@
             <div class="library-toolbar">
               <button type="button" :disabled="savedMarkers.length >= MAX_SAVED_MARKERS" @click="saveNewMarker">新規保存</button>
               <button type="button" :disabled="!selectedSavedMarkerId" @click="overwriteSavedMarker">選択中へ上書き</button>
-              <button type="button" @click="exportMarkerSettings">JSON保存</button>
+              <button type="button" :disabled="settingsExporting" @click="exportMarkerSettings">
+                {{ settingsExporting ? 'JSON準備中...' : mobileLayout ? 'JSON保存・共有' : 'JSON保存' }}
+              </button>
               <button type="button" @click="openMarkerSettingsFile">JSON読込</button>
             </div>
             <div class="image-export-panel">
@@ -168,7 +178,7 @@
                 </select>
               </label>
               <button type="button" class="image-export-button" :disabled="imageExporting" @click="exportMarkerImage">
-                {{ imageExporting ? 'SVG作成中...' : '画像保存（SVG）' }}
+                {{ imageExporting ? 'SVG作成中...' : mobileLayout ? 'SVG保存・共有' : '画像保存（SVG）' }}
               </button>
             </div>
             <input ref="markerSettingsFileInput" class="marker-settings-file-input" type="file" accept="application/json,.json" @change="importMarkerSettings" />
@@ -184,11 +194,13 @@
                 <button type="button" class="library-marker-summary" @click="selectSavedMarker(marker)">
                   <span class="library-marker-color" :style="{ backgroundColor: marker.settings?.color || '#8fefff' }"></span>
                   <span class="library-marker-name">{{ marker.name }}</span>
-                  <span class="library-marker-meta">{{ marker.settings?.rings?.length || 0 }}レイヤー</span>
+                  <span class="library-marker-meta">
+                    {{ mobileLayout ? `${marker.settings?.rings?.length || 0}層` : `${marker.settings?.rings?.length || 0}レイヤー` }}
+                  </span>
                 </button>
                 <div class="library-marker-actions">
                   <button type="button" @click="loadSavedMarker(marker)">読込</button>
-                  <button type="button" class="library-delete-button" @click="deleteSavedMarker(marker.id)">削除</button>
+                  <button type="button" class="library-delete-button" @click="requestSavedMarkerDelete(marker.id)">削除</button>
                 </div>
               </article>
             </div>
@@ -936,7 +948,7 @@
               type="button"
               class="remove-ring-button"
               :disabled="draft.rings.length <= 1"
-              @click="removeSelectedRing"
+              @click="requestSelectedRingDelete"
             >
               選択中のレイヤーを削除
             </button>
@@ -1197,7 +1209,7 @@
             <section class="mobile-layer-context-menu">
               <strong>{{ contextLayerName }}</strong>
               <button type="button" :disabled="draft.rings.length >= MAX_RINGS" @click="duplicateContextLayer">複製</button>
-              <button type="button" class="danger-button" :disabled="draft.rings.length <= 1" @click="removeContextLayer">削除</button>
+              <button type="button" class="danger-button" :disabled="draft.rings.length <= 1" @click="requestContextLayerDelete">削除</button>
               <button type="button" @click="closeLayerContextMenu">キャンセル</button>
             </section>
           </div>
@@ -1246,6 +1258,23 @@
             <small>現在の設定を反映して作成画面を閉じる</small>
           </button>
         </aside>
+      </div>
+
+      <div
+        v-if="deleteConfirmation"
+        class="delete-confirmation-backdrop"
+        @click.self="cancelDeleteConfirmation"
+      >
+        <section class="delete-confirmation-dialog" role="dialog" aria-modal="true" aria-labelledby="delete-confirmation-title">
+          <strong id="delete-confirmation-title">削除の確認</strong>
+          <p>「{{ deleteConfirmation.name }}」を削除しますか？</p>
+          <small v-if="deleteConfirmation.kind === 'ring'">削除後も「戻る」で復元できます。</small>
+          <small v-else>保存一覧から削除されます。この操作は元に戻せません。</small>
+          <div>
+            <button type="button" @click="cancelDeleteConfirmation">キャンセル</button>
+            <button type="button" class="danger-button" @click="confirmDelete">削除する</button>
+          </div>
+        </section>
       </div>
 
       <div
@@ -1532,8 +1561,8 @@ const DEFAULT_SETTINGS = {
     easing: 'ease-in-out'
   },
   rings: [
-    { id: 'ring-1', transformTiming: makeRingTransformTiming(), appearance: { idle: makeRingAppearance(), moving: makeRingAppearance(), transform: makeRingAppearance() }, motion: { idle: makeMotionState(), moving: makeMotionState(), transform: makeMotionState({ enabled: false }) } },
-    { id: 'ring-2', transformTiming: makeRingTransformTiming(), appearance: { idle: makeRingAppearance({ width: 78, height: 78, opacity: 80, lineStyle: 'dashed', glow: 5 }), moving: makeRingAppearance({ width: 78, height: 78, opacity: 80, lineStyle: 'dashed', glow: 5 }), transform: makeRingAppearance({ width: 78, height: 78, opacity: 80, lineStyle: 'dashed', glow: 5 }) }, motion: { idle: makeMotionState({ rotateEnabled: false, pulseEnabled: true }), moving: makeMotionState({ rotateEnabled: false, pulseEnabled: true }), transform: makeMotionState({ enabled: false, rotateEnabled: false, pulseEnabled: true }) } }
+    { id: 'ring-1', transformTiming: makeRingTransformTiming(), appearance: { idle: makeRingAppearance(), moving: makeRingAppearance(), transform: makeRingAppearance() }, motion: { idle: makeMotionState({ enabled: false }), moving: makeMotionState({ enabled: false }), transform: makeMotionState({ enabled: false }) } },
+    { id: 'ring-2', transformTiming: makeRingTransformTiming(), appearance: { idle: makeRingAppearance({ width: 78, height: 78, opacity: 80, lineStyle: 'dashed', glow: 5 }), moving: makeRingAppearance({ width: 78, height: 78, opacity: 80, lineStyle: 'dashed', glow: 5 }), transform: makeRingAppearance({ width: 78, height: 78, opacity: 80, lineStyle: 'dashed', glow: 5 }) }, motion: { idle: makeMotionState({ enabled: false, rotateEnabled: false, pulseEnabled: true }), moving: makeMotionState({ enabled: false, rotateEnabled: false, pulseEnabled: true }), transform: makeMotionState({ enabled: false, rotateEnabled: false, pulseEnabled: true }) } }
   ]
 }
 
@@ -1568,6 +1597,7 @@ const editingState = ref('idle')
 const copyDestinationState = ref('moving')
 const highlightedRingId = ref(null)
 const pendingOverallShape = ref(null)
+const deleteConfirmation = ref(null)
 const previewCursorFollowActive = ref(false)
 const previewFullscreen = ref(false)
 const rangeEditorOpen = ref(false)
@@ -1732,6 +1762,7 @@ onBeforeUnmount(() => {
   persistMarkerDraft()
   if (previewMoveTimer) clearTimeout(previewMoveTimer)
   if (ringHighlightTimer) clearTimeout(ringHighlightTimer)
+  if (draftHistoryCommitTimer) clearTimeout(draftHistoryCommitTimer)
   if (previewCursorAnimationFrame != null) cancelAnimationFrame(previewCursorAnimationFrame)
   if (layerLongPressTimer) clearTimeout(layerLongPressTimer)
   stopRangeAdjustHold()
@@ -2073,6 +2104,7 @@ const libraryNotice = ref(restoredMarkerDraft ? '前回の編集中データを�
 const markerSettingsFileInput = ref(null)
 const imageExportBackground = ref('transparent')
 const imageExporting = ref(false)
+const settingsExporting = ref(false)
 const EDITOR_SECTION_KEYS = new Set(['library', 'existing', 'display', 'overall', 'rings', 'motion'])
 const activeSection = ref(
   EDITOR_SECTION_KEYS.has(restoredMarkerDraft?.ui?.activeSection)
@@ -2181,6 +2213,56 @@ watch(
   scheduleMarkerDraftPersist,
   { deep: true }
 )
+const DRAFT_HISTORY_LIMIT = 100
+const serializeDraftHistory = () => JSON.stringify(draft.value)
+const draftHistory = ref([serializeDraftHistory()])
+const draftHistoryIndex = ref(0)
+let draftHistoryCommitTimer = null
+const hasPendingDraftHistory = () => (
+  serializeDraftHistory() !== draftHistory.value[draftHistoryIndex.value]
+)
+const canUndoDraft = computed(() => draftHistoryIndex.value > 0 || hasPendingDraftHistory())
+const canRedoDraft = computed(() => (
+  !hasPendingDraftHistory() && draftHistoryIndex.value < draftHistory.value.length - 1
+))
+const commitDraftHistory = () => {
+  if (draftHistoryCommitTimer) {
+    clearTimeout(draftHistoryCommitTimer)
+    draftHistoryCommitTimer = null
+  }
+  const snapshot = serializeDraftHistory()
+  if (snapshot === draftHistory.value[draftHistoryIndex.value]) return
+  const nextHistory = draftHistory.value.slice(0, draftHistoryIndex.value + 1)
+  nextHistory.push(snapshot)
+  if (nextHistory.length > DRAFT_HISTORY_LIMIT) nextHistory.shift()
+  draftHistory.value = nextHistory
+  draftHistoryIndex.value = nextHistory.length - 1
+}
+const scheduleDraftHistoryCommit = () => {
+  if (draftHistoryCommitTimer) clearTimeout(draftHistoryCommitTimer)
+  draftHistoryCommitTimer = setTimeout(commitDraftHistory, 220)
+}
+const restoreDraftHistorySnapshot = snapshot => {
+  draft.value = JSON.parse(snapshot)
+  if (!draft.value.rings.some(ring => ring.id === selectedRingId.value)) {
+    selectedRingId.value = draft.value.rings[0].id
+  }
+  pendingOverallShape.value = null
+  deleteConfirmation.value = null
+}
+const undoDraftChange = () => {
+  commitDraftHistory()
+  if (draftHistoryIndex.value <= 0) return
+  draftHistoryIndex.value -= 1
+  restoreDraftHistorySnapshot(draftHistory.value[draftHistoryIndex.value])
+}
+const redoDraftChange = () => {
+  commitDraftHistory()
+  if (draftHistoryIndex.value >= draftHistory.value.length - 1) return
+  draftHistoryIndex.value += 1
+  restoreDraftHistorySnapshot(draftHistory.value[draftHistoryIndex.value])
+}
+watch(draft, scheduleDraftHistoryCommit, { deep: true })
 const selectedRingItemCount = computed(() => {
   const appearance = selectedRingAppearance.value
   if (appearance.renderMode === 'textRing') {
@@ -2325,20 +2407,6 @@ const markerSettingsJson = () => JSON.stringify({
   exportedAt: new Date().toISOString(),
   settings: cloneMarkerSettings(draft.value)
 }, null, 2)
-const exportMarkerSettings = () => {
-  const json = markerSettingsJson()
-  const fileName = markerNameForSave().replace(/[\\/:*?"<>|]/g, '_')
-  const blob = new Blob([json], { type: 'application/json' })
-  const url = URL.createObjectURL(blob)
-  const link = document.createElement('a')
-  link.href = url
-  link.download = `${fileName || 'target-marker'}.json`
-  document.body.append(link)
-  link.click()
-  link.remove()
-  URL.revokeObjectURL(url)
-  libraryNotice.value = '作成中の設定JSONを保存しました。'
-}
 const downloadBlob = (blob, fileName) => {
   const url = URL.createObjectURL(blob)
   const link = document.createElement('a')
@@ -2348,6 +2416,56 @@ const downloadBlob = (blob, fileName) => {
   link.click()
   link.remove()
   setTimeout(() => URL.revokeObjectURL(url), 0)
+}
+const saveBlobForDevice = async (blob, fileName) => {
+  if (mobileLayout.value && typeof navigator.share === 'function') {
+    const file = new File([blob], fileName, {
+      type: blob.type || 'application/octet-stream',
+      lastModified: Date.now()
+    })
+    let canShareFile = true
+    if (typeof navigator.canShare === 'function') {
+      try {
+        canShareFile = navigator.canShare({ files: [file] })
+      } catch {
+        canShareFile = false
+      }
+    }
+    if (canShareFile) {
+      try {
+        await navigator.share({
+          title: fileName,
+          files: [file]
+        })
+        return 'shared'
+      } catch (error) {
+        if (error?.name === 'AbortError') return 'cancelled'
+        console.warn('[CustomMarkerModal] mobile file share failed; using download fallback', error)
+      }
+    }
+  }
+  downloadBlob(blob, fileName)
+  return 'downloaded'
+}
+const exportMarkerSettings = async () => {
+  if (settingsExporting.value) return
+  settingsExporting.value = true
+  try {
+    const json = markerSettingsJson()
+    const fileName = markerNameForSave().replace(/[\\/:*?"<>|]/g, '_')
+    const blob = new Blob([json], { type: 'application/json' })
+    const result = await saveBlobForDevice(blob, `${fileName || 'target-marker'}.json`)
+    libraryNotice.value = result === 'shared'
+      ? '端末の保存・共有画面へ設定JSONを渡しました。'
+      : result === 'cancelled'
+        ? '設定JSONの保存をキャンセルしました。'
+        : '作成中の設定JSONを保存しました。'
+  } catch (error) {
+    console.error('[CustomMarkerModal] marker settings export failed', error)
+    libraryNotice.value = '設定JSONを保存できませんでした。ブラウザのファイル出力対応を確認してください。'
+  } finally {
+    settingsExporting.value = false
+  }
 }
 const blobToDataUrl = blob => new Promise((resolve, reject) => {
   const reader = new FileReader()
@@ -2441,10 +2559,17 @@ ${cssText}
   </foreignObject>
 </svg>`
     const fileName = markerNameForSave().replace(/[\\/:*?"<>|]/g, '_')
-    downloadBlob(new Blob([svg], { type: 'image/svg+xml;charset=utf-8' }), `${fileName || 'target-marker'}.svg`)
-    libraryNotice.value = imageExportBackground.value === 'transparent'
-      ? '背景透過SVGを保存しました。'
-      : '背景付きSVGを保存しました。'
+    const result = await saveBlobForDevice(
+      new Blob([svg], { type: 'image/svg+xml;charset=utf-8' }),
+      `${fileName || 'target-marker'}.svg`
+    )
+    libraryNotice.value = result === 'shared'
+      ? '端末の保存・共有画面へSVGを渡しました。'
+      : result === 'cancelled'
+        ? 'SVGの保存をキャンセルしました。'
+        : imageExportBackground.value === 'transparent'
+          ? '背景透過SVGを保存しました。'
+          : '背景付きSVGを保存しました。'
   } catch (error) {
     console.error('[CustomMarkerModal] marker image export failed', error)
     libraryNotice.value = 'SVGを作成できませんでした。ブラウザのファイル出力対応を確認してください。'
@@ -2539,6 +2664,15 @@ const deleteSavedMarker = markerId => {
     libraryName.value = ''
   }
   if (persistMarkerLibrary()) libraryNotice.value = `「${marker.name}」を削除しました。`
+}
+const requestSavedMarkerDelete = markerId => {
+  const marker = savedMarkers.value.find(item => item.id === markerId)
+  if (!marker) return
+  deleteConfirmation.value = {
+    kind: 'library',
+    id: marker.id,
+    name: marker.name
+  }
 }
 const setOverallShape = shape => {
   selectedOverall.value.shape = shape
@@ -2753,7 +2887,7 @@ const setRuneSample = () => { runeEditorText.value = RUNE_SAMPLE }
 
 const renderModes = [
   { key: 'continuous', label: '単体形状', description: '中心を基準に、円や模様などの形を1つ描画します。' },
-  { key: 'circumference', label: '円周配置', description: '同じ部品を中心点の周囲へ均等に配置します。' },
+  { key: 'circumference', label: '分割配置', description: '同じ部品を分割し、中心点の周囲へ均等に配置します。' },
   { key: 'textRing', label: '円周文字', description: '文字列または個別ラベルを中心の周囲へ最大64個まで配置します。' }
 ]
 
@@ -3057,14 +3191,37 @@ const removeRingById = ringId => {
   draft.value.rings.splice(index, 1)
   selectedRingId.value = draft.value.rings[Math.max(0, index - 1)].id
 }
-const removeSelectedRing = () => removeRingById(selectedRingId.value)
+const requestRingDelete = ringId => {
+  if (draft.value.rings.length <= 1) return
+  const index = draft.value.rings.findIndex(ring => ring.id === ringId)
+  if (index < 0) return
+  deleteConfirmation.value = {
+    kind: 'ring',
+    id: ringId,
+    name: getRingName(draft.value.rings[index], index)
+  }
+}
+const requestSelectedRingDelete = () => requestRingDelete(selectedRingId.value)
 const duplicateContextLayer = () => {
   duplicateRingById(layerContextRingId.value)
   closeLayerContextMenu()
 }
-const removeContextLayer = () => {
-  removeRingById(layerContextRingId.value)
+const requestContextLayerDelete = () => {
+  requestRingDelete(layerContextRingId.value)
   closeLayerContextMenu()
+}
+const cancelDeleteConfirmation = () => {
+  deleteConfirmation.value = null
+}
+const confirmDelete = () => {
+  const pendingDelete = deleteConfirmation.value
+  if (!pendingDelete) return
+  deleteConfirmation.value = null
+  if (pendingDelete.kind === 'library') {
+    deleteSavedMarker(pendingDelete.id)
+    return
+  }
+  removeRingById(pendingDelete.id)
 }
 
 const materializePresetRing = (preset, index, color) => {
@@ -3369,6 +3526,7 @@ const save = () => {
 <style scoped>
 .custom-marker-modal {
   box-sizing: border-box;
+  position: relative;
   display: grid;
   grid-template-rows: auto 360px 1fr auto;
   gap: 16px;
@@ -3449,6 +3607,21 @@ const save = () => {
   display: flex;
   align-items: center;
   gap: 8px;
+}
+.mobile-history-actions,
+.desktop-history-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.mobile-history-actions button,
+.desktop-history-actions button {
+  white-space: nowrap;
+}
+.mobile-history-actions button:disabled,
+.desktop-history-actions button:disabled {
+  cursor: not-allowed;
+  opacity: 0.35;
 }
 .mobile-menu-trigger,
 .mobile-layer-trigger,
@@ -3606,6 +3779,9 @@ p { margin-top: 8px; color: rgba(200, 240, 250, 0.72); font-size: 20px; line-hei
   white-space: nowrap;
   color: #ffe9a6;
   border-color: rgba(255, 222, 130, 0.5);
+}
+.editor-state-tabs .desktop-history-actions button {
+  min-width: 82px;
 }
 .state-copy-select {
   min-width: 112px;
@@ -4263,6 +4439,45 @@ p { margin-top: 8px; color: rgba(200, 240, 250, 0.72); font-size: 20px; line-hei
 .modal-footer { margin: 0; }
 .modal-footer > button { width: auto; flex: 1 1 0; }
 
+.delete-confirmation-backdrop {
+  position: absolute;
+  z-index: 50;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: rgba(0, 8, 13, 0.76);
+}
+.delete-confirmation-dialog {
+  box-sizing: border-box;
+  display: grid;
+  width: min(520px, 100%);
+  gap: 14px;
+  padding: 22px;
+  border: 1px solid #6de8ff;
+  background: rgba(4, 25, 36, 0.99);
+  box-shadow: 0 0 28px rgba(34, 185, 219, 0.3);
+}
+.delete-confirmation-dialog strong {
+  color: #fff0a8;
+  font-size: 24px;
+}
+.delete-confirmation-dialog p {
+  margin: 0;
+  color: #fff;
+}
+.delete-confirmation-dialog small {
+  color: rgba(215, 247, 255, 0.72);
+}
+.delete-confirmation-dialog > div {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+.delete-confirmation-dialog button {
+  min-height: 44px;
+}
+
 .range-editor-backdrop {
   position: fixed;
   z-index: 20;
@@ -4423,6 +4638,19 @@ p { margin-top: 8px; color: rgba(200, 240, 250, 0.72); font-size: 20px; line-hei
     font-size: 28px;
     line-height: 1;
   }
+  .mobile-layout .mobile-history-actions {
+    gap: 4px;
+  }
+  .mobile-layout .mobile-history-actions button {
+    width: auto;
+    min-width: 0;
+    min-height: 40px;
+    padding: 5px 8px;
+    border: 1px solid rgba(126, 224, 245, 0.42);
+    background: rgba(8, 28, 40, 0.88);
+    color: #d7f7ff;
+    font-size: 13px;
+  }
   .mobile-layout .marker-preview { height: auto; min-height: 0; }
   .mobile-layout .preview-label { top: 6px; left: 8px; font-size: 12px; }
   .mobile-layout .preview-controls {
@@ -4528,6 +4756,44 @@ p { margin-top: 8px; color: rgba(200, 240, 250, 0.72); font-size: 20px; line-hei
   .library-toolbar button,
   .existing-preset-grid button {
     min-height: 44px;
+  }
+  .mobile-layout .marker-library-list article {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .mobile-layout .library-marker-summary {
+    grid-template-columns: 10px minmax(0, 1fr) auto;
+    align-items: start;
+    gap: 7px;
+    width: 100%;
+    padding: 9px;
+  }
+  .mobile-layout .library-marker-color {
+    width: 10px;
+    height: 10px;
+    margin-top: 4px;
+  }
+  .mobile-layout .library-marker-name {
+    display: -webkit-box;
+    overflow: hidden;
+    min-width: 0;
+    line-height: 1.3;
+    overflow-wrap: anywhere;
+    text-overflow: clip;
+    white-space: normal;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+  }
+  .mobile-layout .library-marker-meta {
+    padding-top: 2px;
+    font-size: 12px;
+    line-height: 1.2;
+  }
+  .mobile-layout .library-marker-actions {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .mobile-layout .library-marker-actions button {
+    min-height: 42px;
   }
   .section-heading {
     align-items: flex-start;
