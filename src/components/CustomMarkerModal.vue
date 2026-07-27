@@ -291,6 +291,12 @@
             <details class="ring-advanced-settings">
               <summary>マーカー全体の動き</summary>
               <p>全レイヤーを一つのマーカーとして動かします。レイヤーごとの動きとも同時に使用できます。</p>
+              <label v-if="['moving', 'transform'].includes(editingState)" class="toggle-row state-enabled-toggle">
+                <input v-model="selectedWholeMotion.traceIdle" type="checkbox" />
+                <span>停止時の動きをトレースする</span>
+              </label>
+              <p v-if="selectedWholeMotionTracesIdle" class="setting-hint">停止時の全体動作をそのまま続けながら、{{ editingStateLabel }}の形状変化を同時に行います。</p>
+              <template v-if="!selectedWholeMotionTracesIdle">
               <label v-if="editingState !== 'transform'" class="toggle-row state-enabled-toggle">
                 <input v-model="selectedWholeMotion.enabled" type="checkbox" />
                 <span>この状態で全体をアニメーションする</span>
@@ -359,6 +365,7 @@
                 <input v-model="selectedWholeMotion.repeat" type="checkbox" :disabled="!selectedWholeMotion.enabled" />
                 <span>全体の動きを繰り返す</span>
               </label>
+              </template>
             </details>
             <label class="toggle-row">
               <input v-model="selectedOverall.showCenterDot" type="checkbox" />
@@ -991,6 +998,12 @@
                 </label>
               </template>
             </section>
+            <label v-if="['moving', 'transform'].includes(editingState)" class="toggle-row state-enabled-toggle">
+              <input v-model="selectedMotion.traceIdle" type="checkbox" />
+              <span>停止時の動きをトレースする</span>
+            </label>
+            <p v-if="selectedMotionTracesIdle" class="setting-hint">停止時のレイヤー動作をそのまま続けながら、{{ editingStateLabel }}の形状変化を同時に行います。</p>
+            <template v-if="!selectedMotionTracesIdle">
             <label v-if="editingState !== 'transform'" class="toggle-row state-enabled-toggle">
               <input v-model="selectedMotion.enabled" type="checkbox" />
               <span>この状態でアニメーションする</span>
@@ -1107,6 +1120,7 @@
               <input v-model="selectedMotion.repeat" type="checkbox" :disabled="!selectedMotion.enabled" />
               <span>縮小・拡大／回転を繰り返す</span>
             </label>
+            </template>
           </template>
         </div>
       </section>
@@ -1333,7 +1347,7 @@
 </template>
 
 <script setup>
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { getCurrentScale } from '../useScale.js'
 import BaseHudModal from './BaseHudModal.vue'
 import FontSelectModal from './FontSelectModal.vue'
@@ -1344,6 +1358,7 @@ import symbolMagicCircleExport from '../data/targetMarkerPresets/symbol-magic-ci
 
 const makeMotionState = overrides => ({
   enabled: true,
+  traceIdle: false,
   rotateEnabled: true,
   rotateTarget: 'whole',
   rotateOrigin: 'marker',
@@ -1706,12 +1721,15 @@ const onPreviewFullscreenKeydown = event => {
 onMounted(() => {
   window.addEventListener('resize', updateModalScale)
   window.addEventListener('keydown', onPreviewFullscreenKeydown)
+  window.addEventListener('pagehide', persistMarkerDraft)
   updateModalScale()
 })
 
 onBeforeUnmount(() => {
   window.removeEventListener('resize', updateModalScale)
   window.removeEventListener('keydown', onPreviewFullscreenKeydown)
+  window.removeEventListener('pagehide', persistMarkerDraft)
+  persistMarkerDraft()
   if (previewMoveTimer) clearTimeout(previewMoveTimer)
   if (ringHighlightTimer) clearTimeout(ringHighlightTimer)
   if (previewCursorAnimationFrame != null) cancelAnimationFrame(previewCursorAnimationFrame)
@@ -1989,7 +2007,24 @@ const createDraftFromSettings = settings => {
     rings
   }
 }
-const draft = ref(createDraftFromSettings(props.settings))
+const MARKER_EDITOR_DRAFT_STORAGE_KEY = 'battle-custom-target-marker-editor-draft-v1'
+const readMarkerEditorDraft = () => {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(MARKER_EDITOR_DRAFT_STORAGE_KEY) || 'null')
+    if (!parsed?.settings || typeof parsed.settings !== 'object' || Array.isArray(parsed.settings)) return null
+    return parsed
+  } catch {
+    return null
+  }
+}
+const restoredMarkerDraft = readMarkerEditorDraft()
+const draft = ref(createDraftFromSettings(restoredMarkerDraft?.settings || props.settings))
+if (EDITING_STATE_OPTIONS.some(state => state.key === restoredMarkerDraft?.ui?.editingState)) {
+  editingState.value = restoredMarkerDraft.ui.editingState
+}
+if (EDITING_STATE_OPTIONS.some(state => state.key === restoredMarkerDraft?.ui?.copyDestinationState)) {
+  copyDestinationState.value = restoredMarkerDraft.ui.copyDestinationState
+}
 const mobileLayoutStyle = computed(() => {
   const previewRatio = Math.min(60, Math.max(25, Number(draft.value.behavior.previewRatio) || 40))
   return {
@@ -2018,18 +2053,44 @@ const markerLibrarySizeLabel = computed(() => {
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
   return `${(bytes / 1024 / 1024).toFixed(2)} MB`
 })
-const selectedSavedMarkerId = ref(null)
-const libraryName = ref(typeof draft.value.name === 'string' ? draft.value.name.slice(0, 32) : '')
-const loadedMarkerName = ref(libraryName.value)
+const selectedSavedMarkerId = ref(
+  typeof restoredMarkerDraft?.ui?.selectedSavedMarkerId === 'string'
+    ? restoredMarkerDraft.ui.selectedSavedMarkerId
+    : null
+)
+const libraryName = ref(
+  typeof restoredMarkerDraft?.ui?.libraryName === 'string'
+    ? restoredMarkerDraft.ui.libraryName.slice(0, 32)
+    : typeof draft.value.name === 'string' ? draft.value.name.slice(0, 32) : ''
+)
+const loadedMarkerName = ref(
+  typeof restoredMarkerDraft?.ui?.loadedMarkerName === 'string'
+    ? restoredMarkerDraft.ui.loadedMarkerName.slice(0, 32)
+    : libraryName.value
+)
 const currentMarkerName = computed(() => loadedMarkerName.value.trim() || '新規マーカー')
-const libraryNotice = ref('')
+const libraryNotice = ref(restoredMarkerDraft ? '前回の編集中データを復元しました。' : '')
 const markerSettingsFileInput = ref(null)
 const imageExportBackground = ref('transparent')
 const imageExporting = ref(false)
-const activeSection = ref('rings')
+const EDITOR_SECTION_KEYS = new Set(['library', 'existing', 'display', 'overall', 'rings', 'motion'])
+const activeSection = ref(
+  EDITOR_SECTION_KEYS.has(restoredMarkerDraft?.ui?.activeSection)
+    ? restoredMarkerDraft.ui.activeSection
+    : 'rings'
+)
 const ringAdvancedSettingsOpen = ref(false)
-const appliedPresetKey = ref(null)
-const selectedRingId = ref(draft.value.rings[0].id)
+const appliedPresetKey = ref(
+  typeof restoredMarkerDraft?.ui?.appliedPresetKey === 'string'
+    ? restoredMarkerDraft.ui.appliedPresetKey
+    : null
+)
+const restoredSelectedRingId = restoredMarkerDraft?.ui?.selectedRingId
+const selectedRingId = ref(
+  draft.value.rings.some(ring => ring.id === restoredSelectedRingId)
+    ? restoredSelectedRingId
+    : draft.value.rings[0].id
+)
 const selectedRingIndex = computed(() => Math.max(0, draft.value.rings.findIndex(ring => ring.id === selectedRingId.value)))
 const selectedRing = computed(() => draft.value.rings[selectedRingIndex.value])
 const selectedRingTransformTiming = computed(() => selectedRing.value.transformTiming)
@@ -2061,6 +2122,9 @@ const contextLayerName = computed(() => {
 })
 const selectedOverall = computed(() => draft.value.appearance[editingState.value])
 const selectedWholeMotion = computed(() => draft.value.wholeMotion[editingState.value])
+const selectedWholeMotionTracesIdle = computed(() => (
+  ['moving', 'transform'].includes(editingState.value) && selectedWholeMotion.value.traceIdle === true
+))
 const selectedRingAppearance = computed(() => selectedRing.value.appearance[editingState.value])
 const CUTOUT_SHAPES = new Set(['circle', 'point', 'square', 'triangle', 'diamond', 'star', 'hexagram', 'octagram', 'sparkle', 'arrow', 'arrowhead', 'sector', 'moon', 'sharpMoon', 'gear', 'gear2', 'heart', 'sun'])
 const selectedRingSupportsCutout = computed(() => CUTOUT_SHAPES.has(selectedRingAppearance.value.shape))
@@ -2069,6 +2133,54 @@ const selectedRingSupportsLayerErase = computed(() => (
   && ['continuous', 'circumference'].includes(selectedRingAppearance.value.renderMode)
 ))
 const selectedMotion = computed(() => selectedRing.value.motion[editingState.value])
+const selectedMotionTracesIdle = computed(() => (
+  ['moving', 'transform'].includes(editingState.value) && selectedMotion.value.traceIdle === true
+))
+let markerDraftPersistTimer = null
+const persistMarkerDraft = () => {
+  if (markerDraftPersistTimer) {
+    clearTimeout(markerDraftPersistTimer)
+    markerDraftPersistTimer = null
+  }
+  try {
+    localStorage.setItem(MARKER_EDITOR_DRAFT_STORAGE_KEY, JSON.stringify({
+      version: 1,
+      updatedAt: Date.now(),
+      settings: draft.value,
+      ui: {
+        editingState: editingState.value,
+        copyDestinationState: copyDestinationState.value,
+        activeSection: activeSection.value,
+        selectedRingId: selectedRingId.value,
+        selectedSavedMarkerId: selectedSavedMarkerId.value,
+        libraryName: libraryName.value,
+        loadedMarkerName: loadedMarkerName.value,
+        appliedPresetKey: appliedPresetKey.value
+      }
+    }))
+  } catch (error) {
+    console.warn('[CustomMarkerModal] editor draft autosave failed', error)
+  }
+}
+const scheduleMarkerDraftPersist = () => {
+  if (markerDraftPersistTimer) clearTimeout(markerDraftPersistTimer)
+  markerDraftPersistTimer = setTimeout(persistMarkerDraft, 100)
+}
+watch(
+  [
+    draft,
+    editingState,
+    copyDestinationState,
+    activeSection,
+    selectedRingId,
+    selectedSavedMarkerId,
+    libraryName,
+    loadedMarkerName,
+    appliedPresetKey
+  ],
+  scheduleMarkerDraftPersist,
+  { deep: true }
+)
 const selectedRingItemCount = computed(() => {
   const appearance = selectedRingAppearance.value
   if (appearance.renderMode === 'textRing') {

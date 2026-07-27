@@ -788,15 +788,21 @@ const customWholeMotion = computed(() => {
     pulseAmount: 18,
     repeat: true
   }
-  const targetMotion = { ...baseMotion, ...(customMarkerSettings.value.wholeMotion?.[state] || {}) }
+  const resolveWholeMotion = motionState => {
+    const configuredMotion = customMarkerSettings.value.wholeMotion?.[motionState] || {}
+    if (['moving', 'transform'].includes(motionState) && configuredMotion.traceIdle === true) {
+      return {
+        ...baseMotion,
+        ...(customMarkerSettings.value.wholeMotion?.idle || {}),
+        traceIdle: true
+      }
+    }
+    return { ...baseMotion, ...configuredMotion }
+  }
+  const targetMotion = resolveWholeMotion(state)
   if (!isCustomStateTransitionActive()) return targetMotion
   return interpolateTransitionSettings(
-    {
-      ...baseMotion,
-      ...(customMarkerSettings.value.wholeMotion?.[
-        getGlobalAppearanceState(splitCountTransitionFromState.value)
-      ] || {})
-    },
+    resolveWholeMotion(getGlobalAppearanceState(splitCountTransitionFromState.value)),
     targetMotion,
     getTransitionEasedProgress(getGlobalTransformProgress())
   )
@@ -1044,11 +1050,21 @@ const customMarkerStyle = computed(() => {
 })
 const getCustomRingMotion = ring => {
   const state = getRingAppearanceState(ring, resolvedCustomMarkerState.value)
-  if (ring.motion?.[state]) {
-    const targetMotion = ring.motion[state]
+  const resolveRingMotion = motionState => {
+    const configuredMotion = ring.motion?.[motionState]
+    if (['moving', 'transform'].includes(motionState) && configuredMotion?.traceIdle === true) {
+      return {
+        ...(ring.motion?.idle || configuredMotion),
+        traceIdle: true
+      }
+    }
+    return configuredMotion
+  }
+  const targetMotion = resolveRingMotion(state)
+  if (targetMotion) {
     if (!isCustomStateTransitionActive()) return targetMotion
     const fromState = getRingAppearanceState(ring, splitCountTransitionFromState.value)
-    const fromMotion = ring.motion?.[fromState]
+    const fromMotion = resolveRingMotion(fromState)
       || (fromState === 'transform' ? ring.motion?.idle : null)
       || targetMotion
     return interpolateTransitionSettings(
