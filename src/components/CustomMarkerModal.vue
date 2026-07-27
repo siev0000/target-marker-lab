@@ -48,7 +48,7 @@
         <div class="preview-label">PREVIEW</div>
         <div v-if="previewFullscreen" class="fullscreen-return-hint">DOUBLE CLICK / ESC / F : RETURN</div>
         <div class="preview-controls">
-          <span>{{ previewMoving ? '移動時' : '停止時' }}</span>
+          <span>{{ previewStateLabel }}</span>
           <span v-if="draft.behavior.followCursor" :class="{ tracking: previewCursorFollowActive }">
             {{ previewCursorFollowActive ? '追従中' : 'クリックで追従' }}
           </span>
@@ -60,7 +60,9 @@
             marker-type="custom"
             :custom-marker-settings="draft"
             :is-target-moving="previewMoving"
+            :custom-marker-state="previewMarkerState"
             :highlight-ring-id="highlightedRingId"
+            :enable-erase-debug-preview="true"
           />
         </div>
       </section>
@@ -80,10 +82,12 @@
         <div class="editor-state-tabs" aria-label="編集する状態">
           <span>EDIT STATE</span>
           <button type="button" :class="{ active: editingState === 'idle' }" @click="selectEditingState('idle')">停止時</button>
+          <button type="button" :class="{ active: editingState === 'transform' }" @click="selectEditingState('transform')">変換先</button>
           <button type="button" :class="{ active: editingState === 'moving' }" @click="selectEditingState('moving')">移動時</button>
-          <button type="button" class="state-copy-button" @click="copyEditingStateToOther">
-            {{ editingState === 'idle' ? '停止→移動へコピー' : '移動→停止へコピー' }}
-          </button>
+          <select v-model="copyDestinationState" class="state-copy-select" aria-label="状態のコピー先">
+            <option v-for="state in copyDestinationOptions" :key="state.key" :value="state.key">{{ state.label }}へ</option>
+          </select>
+          <button type="button" class="state-copy-button" @click="copyEditingStateTo(copyDestinationState)">コピー</button>
         </div>
         <div class="ring-tabs" aria-label="編集するレイヤー">
           <div class="ring-tabs-header">
@@ -155,8 +159,20 @@
               <button type="button" @click="exportMarkerSettings">JSON保存</button>
               <button type="button" @click="openMarkerSettingsFile">JSON読込</button>
             </div>
+            <div class="image-export-panel">
+              <label>
+                <span>画像背景</span>
+                <select v-model="imageExportBackground">
+                  <option value="transparent">背景透過</option>
+                  <option value="preview">プレビュー背景を含める</option>
+                </select>
+              </label>
+              <button type="button" class="image-export-button" :disabled="imageExporting" @click="exportMarkerImage">
+                {{ imageExporting ? 'SVG作成中...' : '画像保存（SVG）' }}
+              </button>
+            </div>
             <input ref="markerSettingsFileInput" class="marker-settings-file-input" type="file" accept="application/json,.json" @change="importMarkerSettings" />
-            <p class="library-export-note">作成中の停止時・移動時設定をJSONとしてコピー・保存・読込できます。読込内容は決定するまで戦闘画面へ反映されません。</p>
+            <p class="library-export-note">作成中の停止時・移動時設定をJSONとして保存・読込できます。画像は現在のプレビュー状態をSVGで保存します。</p>
             <div v-if="libraryNotice" class="library-notice">{{ libraryNotice }}</div>
             <div v-if="savedMarkers.length === 0" class="library-empty">保存されたマーカーはありません。</div>
             <div v-else class="marker-library-list">
@@ -262,6 +278,11 @@
               <input v-model.number="selectedOverall.height" type="range" min="10" max="180" step="1" />
               <output>{{ selectedOverall.height }}%</output>
             </label>
+            <label class="toggle-row">
+              <input v-model="selectedOverall.applyAspectToLayers" type="checkbox" />
+              <span>全体の縦横比をレイヤーの回転・サイズに反映</span>
+            </label>
+            <p class="setting-hint">OFFにすると、全体の表示枠だけを縦横に変更し、各レイヤーと回転は正方形の比率を維持します。</p>
             <label class="setting-row">
               <span>全体の透明度</span>
               <input v-model.number="selectedOverall.opacity" type="range" min="25" max="100" step="1" />
@@ -270,7 +291,7 @@
             <details class="ring-advanced-settings">
               <summary>マーカー全体の動き</summary>
               <p>全レイヤーを一つのマーカーとして動かします。レイヤーごとの動きとも同時に使用できます。</p>
-              <label class="toggle-row state-enabled-toggle">
+              <label v-if="editingState !== 'transform'" class="toggle-row state-enabled-toggle">
                 <input v-model="selectedWholeMotion.enabled" type="checkbox" />
                 <span>この状態で全体をアニメーションする</span>
               </label>
@@ -343,6 +364,47 @@
               <input v-model="selectedOverall.showCenterDot" type="checkbox" />
               <span>中央点を表示</span>
             </label>
+            <section v-if="editingState === 'transform'" class="transform-transition-settings">
+              <h4>全体の変換タイミング</h4>
+              <p>マーカー全体と、全体設定を使うレイヤーに適用します。</p>
+              <label class="setting-row select-row">
+                <span>変換動作</span>
+                <select :value="draft.transition.transformMode" @change="setTransformMode($event.target.value)">
+                  <option value="none">アニメーションしない</option>
+                  <option value="reverse">変換先となってから戻る</option>
+                  <option value="reset">変換完了後に停止時へ戻る</option>
+                </select>
+              </label>
+              <label class="setting-row">
+                <span>変更速度</span>
+                <input v-model.number="draft.transition.transformDuration" type="range" min="100" max="10000" step="100" />
+                <output>{{ draft.transition.transformDuration }}ms</output>
+              </label>
+              <label v-if="draft.transition.transformMode === 'reverse'" class="setting-row">
+                <span>戻る速度</span>
+                <input v-model.number="draft.transition.transformReturnDuration" type="range" min="100" max="10000" step="100" />
+                <output>{{ draft.transition.transformReturnDuration }}ms</output>
+              </label>
+              <label class="setting-row">
+                <span>動き出し遅延</span>
+                <input v-model.number="draft.transition.transformStartDelay" type="range" min="0" max="10000" step="100" />
+                <output>{{ draft.transition.transformStartDelay }}ms</output>
+              </label>
+              <label class="setting-row">
+                <span>変換先になってからの遅延</span>
+                <input v-model.number="draft.transition.transformHoldDuration" type="range" min="0" max="10000" step="100" />
+                <output>{{ draft.transition.transformHoldDuration }}ms</output>
+              </label>
+              <label class="setting-row select-row">
+                <span>変化方法</span>
+                <select v-model="draft.transition.easing">
+                  <option value="linear">一定</option>
+                  <option value="ease-in-out">滑らか</option>
+                  <option value="ease-in">加速</option>
+                  <option value="ease-out">減速</option>
+                </select>
+              </label>
+            </section>
             <div class="transition-settings">
               <h3>移動変形</h3>
               <p>停止時と移動時の形状を切り替える順序と時間を設定します。</p>
@@ -368,15 +430,6 @@
                 <span>停止形状へ</span>
                 <input v-model.number="draft.transition.morphOutDuration" type="range" min="0" max="1500" step="50" />
                 <output>{{ draft.transition.morphOutDuration }}ms</output>
-              </label>
-              <label class="setting-row select-row">
-                <span>変化方法</span>
-                <select v-model="draft.transition.easing">
-                  <option value="linear">一定</option>
-                  <option value="ease-in-out">滑らか</option>
-                  <option value="ease-in">加速</option>
-                  <option value="ease-out">減速</option>
-                </select>
               </label>
             </div>
           </template>
@@ -745,6 +798,10 @@
               <span>内側を塗る</span>
             </label>
             <template v-if="!['segmentedArc', 'textRing'].includes(selectedRingAppearance.renderMode) && selectedRingAppearance.fillEnabled">
+              <label v-if="selectedRingAppearance.lineStyle === 'double'" class="toggle-row">
+                <input v-model="selectedRingAppearance.fillBetweenDoubleLines" type="checkbox" />
+                <span>二重線の間だけ塗る</span>
+              </label>
               <template v-if="selectedRingAppearance.shape === 'gear'">
                 <label class="toggle-row">
                   <input v-model="selectedRingAppearance.gearFillBody" type="checkbox" />
@@ -775,7 +832,12 @@
               <input v-model="selectedRingAppearance.eraseBelow" type="checkbox" />
               <span>形状の内側で下層レイヤーを透明化</span>
             </label>
+            <label v-if="selectedRingSupportsLayerErase && selectedRingAppearance.eraseBelow" class="toggle-row layer-erase-toggle">
+              <input v-model="selectedRingAppearance.eraseDebug" type="checkbox" />
+              <span>透過確認（確認色を表示）</span>
+            </label>
             <p v-if="selectedRingAppearance.eraseBelow" class="setting-hint">このレイヤーより描画順が下のマーカーだけを切り抜きます。背景とキャラクターは穴から表示されます。</p>
+            <p v-if="selectedRingAppearance.eraseBelow && selectedRingAppearance.eraseDebug" class="setting-hint">マゼンタ色の範囲が、現在このレイヤーから透明化判定へ渡されている領域です。確認色は編集プレビューだけに表示されます。</p>
             <label v-if="['circumference', 'textRing'].includes(selectedRingAppearance.renderMode) && selectedRingItemCount > 1" class="toggle-row">
               <input v-model="selectedRingAppearance.useSegmentColors" type="checkbox" />
               <span>分割片ごとに色を設定</span>
@@ -875,8 +937,61 @@
 
           <template v-else-if="activeSection === 'motion'">
             <h3>動き</h3>
-            <p>レイヤー {{ selectedRingIndex + 1 }} の停止時と移動時を個別に設定します。</p>
-            <label class="toggle-row state-enabled-toggle">
+            <p>レイヤー {{ selectedRingIndex + 1 }} の停止時・移動時・変換先を個別に設定します。</p>
+            <section v-if="editingState === 'transform'" class="transform-transition-settings">
+              <h4>このレイヤーの変換タイミング</h4>
+              <label class="toggle-row">
+                <input
+                  v-model="selectedRingTransformTiming.useGlobal"
+                  type="checkbox"
+                  @change="onRingTransformTimingScopeChange"
+                />
+                <span>全体設定を使用</span>
+              </label>
+              <template v-if="!selectedRingTransformTiming.useGlobal">
+                <label class="setting-row select-row">
+                  <span>変換動作</span>
+                  <select
+                    :value="selectedRingTransformTiming.transformMode"
+                    @change="setRingTransformMode($event.target.value)"
+                  >
+                    <option value="none">アニメーションしない</option>
+                    <option value="reverse">変換先となってから戻る</option>
+                    <option value="reset">変換完了後に停止時へ戻る</option>
+                  </select>
+                </label>
+                <label class="setting-row">
+                  <span>動き出し遅延</span>
+                  <input v-model.number="selectedRingTransformTiming.delay" type="range" min="0" max="10000" step="100" />
+                  <output>{{ selectedRingTransformTiming.delay }}ms</output>
+                </label>
+                <label class="setting-row">
+                  <span>変更速度</span>
+                  <input v-model.number="selectedRingTransformTiming.duration" type="range" min="100" max="10000" step="100" />
+                  <output>{{ selectedRingTransformTiming.duration }}ms</output>
+                </label>
+                <label v-if="selectedRingTransformTiming.transformMode === 'reverse'" class="setting-row">
+                  <span>戻る速度</span>
+                  <input v-model.number="selectedRingTransformTiming.returnDuration" type="range" min="100" max="10000" step="100" />
+                  <output>{{ selectedRingTransformTiming.returnDuration }}ms</output>
+                </label>
+                <label class="setting-row">
+                  <span>変換先になってからの遅延</span>
+                  <input v-model.number="selectedRingTransformTiming.holdDuration" type="range" min="0" max="10000" step="100" />
+                  <output>{{ selectedRingTransformTiming.holdDuration }}ms</output>
+                </label>
+                <label class="setting-row select-row">
+                  <span>変化方法</span>
+                  <select v-model="selectedRingTransformTiming.easing">
+                    <option value="linear">一定</option>
+                    <option value="ease-in-out">滑らか</option>
+                    <option value="ease-in">加速</option>
+                    <option value="ease-out">減速</option>
+                  </select>
+                </label>
+              </template>
+            </section>
+            <label v-if="editingState !== 'transform'" class="toggle-row state-enabled-toggle">
               <input v-model="selectedMotion.enabled" type="checkbox" />
               <span>この状態でアニメーションする</span>
             </label>
@@ -895,6 +1010,13 @@
                 <select v-model="selectedMotion.direction" :disabled="!selectedMotion.enabled">
                   <option value="normal">時計回り</option>
                   <option value="reverse">反時計回り</option>
+                </select>
+              </label>
+              <label v-if="selectedMotion.rotateEnabled && (selectedRingAppearance.renderMode !== 'textRing' || selectedMotion.rotateTarget !== 'text')" class="setting-row select-row">
+                <span>回転の中心</span>
+                <select v-model="selectedMotion.rotateOrigin" :disabled="!selectedMotion.enabled">
+                  <option value="marker">マーカー中心（現在と同じ）</option>
+                  <option value="self">このレイヤーの中心</option>
                 </select>
               </label>
               <label v-if="selectedMotion.rotateEnabled && selectedRingAppearance.renderMode === 'textRing'" class="setting-row select-row">
@@ -1092,9 +1214,14 @@
             <span>全画面プレビュー</span>
             <small>設定UIを隠してマーカーだけ確認</small>
           </button>
-          <button type="button" @click="copyFromMobileMenu">
+          <button
+            v-for="state in copyDestinationOptions"
+            :key="`copy-${state.key}`"
+            type="button"
+            @click="copyFromMobileMenu(state.key)"
+          >
             <span>状態間コピー</span>
-            <small>{{ editingState === 'idle' ? '停止時の設定を移動時へコピー' : '移動時の設定を停止時へコピー' }}</small>
+            <small>{{ editingStateLabel }}の設定を{{ state.label }}へコピー</small>
           </button>
           <button type="button" class="danger-button" @click="resetFromMobileMenu">
             <span>初期化</span>
@@ -1219,6 +1346,7 @@ const makeMotionState = overrides => ({
   enabled: true,
   rotateEnabled: true,
   rotateTarget: 'whole',
+  rotateOrigin: 'marker',
   pulseEnabled: false,
   rotateDuration: 8,
   pulseDuration: 3,
@@ -1239,11 +1367,22 @@ const makeMotionState = overrides => ({
   fillPulseMin: 20,
   ...overrides
 })
+const makeRingTransformTiming = overrides => ({
+  useGlobal: true,
+  transformMode: 'none',
+  delay: 0,
+  duration: 1200,
+  returnDuration: 1200,
+  holdDuration: 500,
+  easing: 'ease-in-out',
+  ...overrides
+})
 const makeOverallAppearance = overrides => ({
   shape: 'circle',
   size: 100,
   width: 100,
   height: 100,
+  applyAspectToLayers: false,
   opacity: 88,
   showCenterDot: true,
   ...overrides
@@ -1284,6 +1423,7 @@ const makeRingAppearance = overrides => ({
   glow: 8,
   glowColor: '#8fefff',
   fillEnabled: false,
+  fillBetweenDoubleLines: false,
   fillColor: '#8fefff',
   fillOpacity: 30,
   cutoutEnabled: false,
@@ -1297,6 +1437,7 @@ const makeRingAppearance = overrides => ({
   gearSupportOffset: 0,
   gearFillBody: true,
   eraseBelow: false,
+  eraseDebug: false,
   useSegmentColors: false,
   segmentColors: Array(TEXT_ITEM_LIMIT).fill('#8fefff'),
   zIndex: 0,
@@ -1355,22 +1496,29 @@ const DEFAULT_SETTINGS = {
   },
   appearance: {
     idle: makeOverallAppearance(),
-    moving: makeOverallAppearance()
+    moving: makeOverallAppearance(),
+    transform: makeOverallAppearance()
   },
   wholeMotion: {
     idle: makeMotionState({ enabled: false, rotateEnabled: false }),
-    moving: makeMotionState({ enabled: false, rotateEnabled: false })
+    moving: makeMotionState({ enabled: false, rotateEnabled: false }),
+    transform: makeMotionState({ enabled: false, rotateEnabled: false })
   },
   transition: {
     sequence: 'before',
     morphInDuration: 250,
     moveDuration: 350,
     morphOutDuration: 250,
+    transformMode: 'none',
+    transformDuration: 1200,
+    transformReturnDuration: 1200,
+    transformStartDelay: 500,
+    transformHoldDuration: 500,
     easing: 'ease-in-out'
   },
   rings: [
-    { id: 'ring-1', appearance: { idle: makeRingAppearance(), moving: makeRingAppearance() }, motion: { idle: makeMotionState(), moving: makeMotionState() } },
-    { id: 'ring-2', appearance: { idle: makeRingAppearance({ width: 78, height: 78, opacity: 80, lineStyle: 'dashed', glow: 5 }), moving: makeRingAppearance({ width: 78, height: 78, opacity: 80, lineStyle: 'dashed', glow: 5 }) }, motion: { idle: makeMotionState({ rotateEnabled: false, pulseEnabled: true }), moving: makeMotionState({ rotateEnabled: false, pulseEnabled: true }) } }
+    { id: 'ring-1', transformTiming: makeRingTransformTiming(), appearance: { idle: makeRingAppearance(), moving: makeRingAppearance(), transform: makeRingAppearance() }, motion: { idle: makeMotionState(), moving: makeMotionState(), transform: makeMotionState({ enabled: false }) } },
+    { id: 'ring-2', transformTiming: makeRingTransformTiming(), appearance: { idle: makeRingAppearance({ width: 78, height: 78, opacity: 80, lineStyle: 'dashed', glow: 5 }), moving: makeRingAppearance({ width: 78, height: 78, opacity: 80, lineStyle: 'dashed', glow: 5 }), transform: makeRingAppearance({ width: 78, height: 78, opacity: 80, lineStyle: 'dashed', glow: 5 }) }, motion: { idle: makeMotionState({ rotateEnabled: false, pulseEnabled: true }), moving: makeMotionState({ rotateEnabled: false, pulseEnabled: true }), transform: makeMotionState({ enabled: false, rotateEnabled: false, pulseEnabled: true }) } }
   ]
 }
 
@@ -1385,6 +1533,11 @@ const emit = defineEmits(['close', 'save'])
 const MAX_RINGS = 24
 const MODAL_BASE_WIDTH = 720
 const MODAL_BASE_HEIGHT = 1280
+const EDITING_STATE_OPTIONS = [
+  { key: 'idle', label: '停止時' },
+  { key: 'transform', label: '変換先' },
+  { key: 'moving', label: '移動時' }
+]
 const modalScale = ref(1)
 const mobileLayout = ref(false)
 const mobileLayerDrawerOpen = ref(false)
@@ -1397,6 +1550,7 @@ const dragOverRingId = ref(null)
 const previewMoving = ref(false)
 const previewPosition = ref({ x: 50, y: 50 })
 const editingState = ref('idle')
+const copyDestinationState = ref('moving')
 const highlightedRingId = ref(null)
 const pendingOverallShape = ref(null)
 const previewCursorFollowActive = ref(false)
@@ -1568,15 +1722,35 @@ onBeforeUnmount(() => {
 const makeRing = index => ({
   id: `ring-${Date.now()}-${index}`,
   name: '',
+  transformTiming: makeRingTransformTiming(),
   appearance: {
     idle: makeRingAppearance({ width: Math.max(20, 100 - index * 14), height: Math.max(20, 100 - index * 14) }),
-    moving: makeRingAppearance({ width: Math.max(20, 100 - index * 14), height: Math.max(20, 100 - index * 14) })
+    moving: makeRingAppearance({ width: Math.max(20, 100 - index * 14), height: Math.max(20, 100 - index * 14) }),
+    transform: makeRingAppearance({ width: Math.max(20, 100 - index * 14), height: Math.max(20, 100 - index * 14) })
   },
   motion: {
     idle: makeMotionState({ enabled: false, rotateEnabled: false }),
-    moving: makeMotionState({ enabled: false, rotateEnabled: false })
+    moving: makeMotionState({ enabled: false, rotateEnabled: false }),
+    transform: makeMotionState({ enabled: false, rotateEnabled: false })
   }
 })
+const normalizeRingTransformTiming = timing => {
+  const source = timing || {}
+  const holdDuration = Number(source.holdDuration)
+  const easing = ['linear', 'ease-in', 'ease-out', 'ease-in-out'].includes(source.easing)
+    ? source.easing
+    : 'ease-in-out'
+  const duration = Math.min(10000, Math.max(100, Number(source.duration) || 1200))
+  return makeRingTransformTiming({
+    useGlobal: source.useGlobal !== false,
+    transformMode: ['reverse', 'reset'].includes(source.transformMode) ? source.transformMode : 'none',
+    delay: Math.min(10000, Math.max(0, Number(source.delay) || 0)),
+    duration,
+    returnDuration: Math.min(10000, Math.max(100, Number(source.returnDuration) || duration)),
+    holdDuration: Math.min(10000, Math.max(0, Number.isFinite(holdDuration) ? holdDuration : 500)),
+    easing
+  })
+}
 const normalizeRingMotion = ring => {
   const legacyState = makeMotionState({
     rotateEnabled: typeof ring.rotateEnabled === 'boolean' ? ring.rotateEnabled : ring.animationType === 'rotate',
@@ -1584,6 +1758,7 @@ const normalizeRingMotion = ring => {
     rotateDuration: Number(ring.rotateDuration) || Number(ring.duration) || 8,
     pulseDuration: Number(ring.pulseDuration) || Number(ring.duration) || 3,
     direction: ring.direction === 'reverse' ? 'reverse' : 'normal',
+    rotateOrigin: ring.rotateOrigin === 'self' ? 'self' : 'marker',
     delay: Number(ring.delay) || 0,
     pulseAmount: Number(ring.pulseAmount) || 18,
     repeat: ring.repeat !== false
@@ -1599,6 +1774,12 @@ const normalizeRingMotion = ring => {
       ...legacyState,
       enabled: trigger === 'always' || trigger === 'moving',
       ...(ring.motion?.moving || {})
+    },
+    transform: {
+      ...legacyState,
+      enabled: trigger === 'always',
+      ...(ring.motion?.idle || {}),
+      ...(ring.motion?.transform || {})
     }
   }
 }
@@ -1646,6 +1827,7 @@ const normalizeRingAppearance = ring => {
     glow: Number(ring.glow) || 0,
     glowColor: ring.glowColor || ring.color || '#8fefff',
     fillEnabled: ring.fillEnabled === true,
+    fillBetweenDoubleLines: ring.fillBetweenDoubleLines === true,
     fillColor: ring.fillColor || ring.color || '#8fefff',
     fillOpacity: Number(ring.fillOpacity) || 30,
     cutoutEnabled: ring.cutoutEnabled === true,
@@ -1659,6 +1841,7 @@ const normalizeRingAppearance = ring => {
     gearSupportOffset: Math.min(30, Math.max(-30, Number(ring.gearSupportOffset) || 0)),
     gearFillBody: ring.gearFillBody !== false,
     eraseBelow: ring.eraseBelow === true,
+    eraseDebug: ring.eraseDebug === true,
     useSegmentColors: ring.useSegmentColors === true,
     segmentColors: Array.from({ length: TEXT_ITEM_LIMIT }, (_, index) => ring.segmentColors?.[index] || ring.color || '#8fefff'),
     textMode: ring.textMode === 'labels' ? 'labels' : 'string',
@@ -1682,6 +1865,7 @@ const normalizeRingAppearance = ring => {
   })
   const idleState = ring.appearance?.idle || {}
   const movingState = ring.appearance?.moving || {}
+  const transformState = ring.appearance?.transform || idleState
   return {
     idle: {
       ...legacy,
@@ -1696,11 +1880,19 @@ const normalizeRingAppearance = ring => {
       renderMode: movingState.renderMode || (movingState.layout === 'arc' ? 'circumference' : legacy.renderMode),
       segmentColors: Array.from({ length: TEXT_ITEM_LIMIT }, (_, index) => movingState.segmentColors?.[index] || legacy.segmentColors[index]),
       segmentLabels: makeTextItemArray(movingState.segmentLabels || legacy.segmentLabels)
+    },
+    transform: {
+      ...legacy,
+      ...transformState,
+      renderMode: transformState.renderMode || (transformState.layout === 'arc' ? 'circumference' : legacy.renderMode),
+      segmentColors: Array.from({ length: TEXT_ITEM_LIMIT }, (_, index) => transformState.segmentColors?.[index] || legacy.segmentColors[index]),
+      segmentLabels: makeTextItemArray(transformState.segmentLabels || legacy.segmentLabels)
     }
   }
 }
 const cloneRing = ring => ({
   ...ring,
+  transformTiming: normalizeRingTransformTiming(ring.transformTiming),
   appearance: {
     idle: {
       ...ring.appearance.idle,
@@ -1711,35 +1903,52 @@ const cloneRing = ring => ({
       ...ring.appearance.moving,
       segmentColors: [...ring.appearance.moving.segmentColors],
       segmentLabels: [...ring.appearance.moving.segmentLabels]
+    },
+    transform: {
+      ...ring.appearance.transform,
+      segmentColors: [...ring.appearance.transform.segmentColors],
+      segmentLabels: [...ring.appearance.transform.segmentLabels]
     }
   },
   motion: {
     idle: { ...ring.motion.idle },
-    moving: { ...ring.motion.moving }
+    moving: { ...ring.motion.moving },
+    transform: { ...ring.motion.transform }
   }
 })
 const createDraftFromSettings = settings => {
   const source = settings || {}
+  const transformMode = ['reverse', 'reset'].includes(source.transition?.transformMode)
+    ? source.transition.transformMode
+    : 'none'
   const rings = Array.isArray(source.rings) && source.rings.length > 0
     ? source.rings.map((ring, index) => {
       return {
         ...makeRing(index + 1),
         ...ring,
         appearance: normalizeRingAppearance(ring),
-        motion: normalizeRingMotion(ring)
+        motion: normalizeRingMotion(ring),
+        transformTiming: normalizeRingTransformTiming(ring.transformTiming)
       }
     })
     : DEFAULT_SETTINGS.rings.map(cloneRing)
+  rings.forEach(ring => {
+    ring.motion.transform.enabled = ring.transformTiming.useGlobal
+      ? transformMode !== 'none'
+      : ring.transformTiming.transformMode !== 'none'
+  })
   const legacyOverall = makeOverallAppearance({
     shape: source.shape || DEFAULT_SETTINGS.shape,
     size: Number(source.size) || DEFAULT_SETTINGS.size,
     width: Number(source.width) || Number(source.size) || DEFAULT_SETTINGS.size,
     height: Number(source.height) || Number(source.size) || DEFAULT_SETTINGS.size,
+    applyAspectToLayers: source.applyAspectToLayers === true,
     opacity: Number(source.opacity) || DEFAULT_SETTINGS.opacity,
     showCenterDot: source.showCenterDot !== false
   })
   const idleOverall = source.appearance?.idle || {}
   const movingOverall = source.appearance?.moving || {}
+  const transformOverall = source.appearance?.transform || idleOverall
   return {
     ...DEFAULT_SETTINGS,
     ...source,
@@ -1755,13 +1964,27 @@ const createDraftFromSettings = settings => {
         ...movingOverall,
         width: Number(movingOverall.width) || Number(movingOverall.size) || legacyOverall.width,
         height: Number(movingOverall.height) || Number(movingOverall.size) || legacyOverall.height
+      },
+      transform: {
+        ...legacyOverall,
+        ...transformOverall,
+        width: Number(transformOverall.width) || Number(transformOverall.size) || legacyOverall.width,
+        height: Number(transformOverall.height) || Number(transformOverall.size) || legacyOverall.height
       }
     },
     wholeMotion: {
       idle: makeMotionState({ enabled: false, rotateEnabled: false, ...(source.wholeMotion?.idle || {}) }),
-      moving: makeMotionState({ enabled: false, rotateEnabled: false, ...(source.wholeMotion?.moving || {}) })
+      moving: makeMotionState({ enabled: false, rotateEnabled: false, ...(source.wholeMotion?.moving || {}) }),
+      transform: makeMotionState({ rotateEnabled: false, ...(source.wholeMotion?.idle || {}), ...(source.wholeMotion?.transform || {}), enabled: transformMode !== 'none' })
     },
-    transition: { ...DEFAULT_SETTINGS.transition, ...(source.transition || {}) },
+    transition: {
+      ...DEFAULT_SETTINGS.transition,
+      ...(source.transition || {}),
+      transformMode,
+      transformReturnDuration: Number(source.transition?.transformReturnDuration)
+        || Number(source.transition?.transformDuration)
+        || DEFAULT_SETTINGS.transition.transformReturnDuration
+    },
     behavior: { ...DEFAULT_SETTINGS.behavior, ...(source.behavior || {}) },
     rings
   }
@@ -1801,12 +2024,36 @@ const loadedMarkerName = ref(libraryName.value)
 const currentMarkerName = computed(() => loadedMarkerName.value.trim() || '新規マーカー')
 const libraryNotice = ref('')
 const markerSettingsFileInput = ref(null)
+const imageExportBackground = ref('transparent')
+const imageExporting = ref(false)
 const activeSection = ref('rings')
 const ringAdvancedSettingsOpen = ref(false)
 const appliedPresetKey = ref(null)
 const selectedRingId = ref(draft.value.rings[0].id)
 const selectedRingIndex = computed(() => Math.max(0, draft.value.rings.findIndex(ring => ring.id === selectedRingId.value)))
 const selectedRing = computed(() => draft.value.rings[selectedRingIndex.value])
+const selectedRingTransformTiming = computed(() => selectedRing.value.transformTiming)
+const editingStateLabel = computed(() => EDITING_STATE_OPTIONS.find(state => state.key === editingState.value)?.label || '停止時')
+const copyDestinationOptions = computed(() => EDITING_STATE_OPTIONS.filter(state => state.key !== editingState.value))
+const transformAnimationActive = computed(() => (
+  ['reverse', 'reset'].includes(draft.value.transition.transformMode)
+  || draft.value.rings.some(ring => (
+    ring.transformTiming?.useGlobal === false
+    && ['reverse', 'reset'].includes(ring.transformTiming.transformMode)
+  ))
+))
+const previewMarkerState = computed(() => {
+  if (previewMoving.value) return 'moving'
+  if (editingState.value === 'transform') {
+    return transformAnimationActive.value ? '' : 'transform'
+  }
+  return 'idle'
+})
+const previewStateLabel = computed(() => (
+  editingState.value === 'transform' && transformAnimationActive.value
+    ? '変換アニメーション'
+    : EDITING_STATE_OPTIONS.find(state => state.key === previewMarkerState.value)?.label || '停止時'
+))
 const contextLayerName = computed(() => {
   const index = draft.value.rings.findIndex(ring => ring.id === layerContextRingId.value)
   if (index < 0) return ''
@@ -1819,7 +2066,7 @@ const CUTOUT_SHAPES = new Set(['circle', 'point', 'square', 'triangle', 'diamond
 const selectedRingSupportsCutout = computed(() => CUTOUT_SHAPES.has(selectedRingAppearance.value.shape))
 const selectedRingSupportsLayerErase = computed(() => (
   CUTOUT_SHAPES.has(selectedRingAppearance.value.shape)
-  && selectedRingAppearance.value.renderMode === 'continuous'
+  && ['continuous', 'circumference'].includes(selectedRingAppearance.value.renderMode)
 ))
 const selectedMotion = computed(() => selectedRing.value.motion[editingState.value])
 const selectedRingItemCount = computed(() => {
@@ -1941,8 +2188,8 @@ const openFullscreenFromMenu = () => {
   mobileMenuOpen.value = false
   enterPreviewFullscreen()
 }
-const copyFromMobileMenu = () => {
-  copyEditingStateToOther()
+const copyFromMobileMenu = destination => {
+  copyEditingStateTo(destination)
   mobileMenuOpen.value = false
 }
 const resetFromMobileMenu = () => {
@@ -1979,6 +2226,119 @@ const exportMarkerSettings = () => {
   link.remove()
   URL.revokeObjectURL(url)
   libraryNotice.value = '作成中の設定JSONを保存しました。'
+}
+const downloadBlob = (blob, fileName) => {
+  const url = URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = url
+  link.download = fileName
+  document.body.append(link)
+  link.click()
+  link.remove()
+  setTimeout(() => URL.revokeObjectURL(url), 0)
+}
+const blobToDataUrl = blob => new Promise((resolve, reject) => {
+  const reader = new FileReader()
+  reader.onload = () => resolve(reader.result)
+  reader.onerror = () => reject(reader.error)
+  reader.readAsDataURL(blob)
+})
+const inlineCssUrls = async (cssText, baseUrl) => {
+  const matches = [...cssText.matchAll(/url\(\s*(['"]?)(.*?)\1\s*\)/g)]
+  let inlined = cssText
+  for (const match of matches) {
+    const rawUrl = match[2]?.trim()
+    if (!rawUrl || rawUrl.startsWith('data:') || rawUrl.startsWith('#')) continue
+    try {
+      const resourceUrl = new URL(rawUrl, baseUrl || document.baseURI).href
+      const response = await fetch(resourceUrl)
+      if (!response.ok) continue
+      const dataUrl = await blobToDataUrl(await response.blob())
+      inlined = inlined.replace(match[0], `url("${dataUrl}")`)
+    } catch {
+      // Keep the original URL when an optional resource cannot be embedded.
+    }
+  }
+  return inlined
+}
+const getMarkerExportCss = async () => {
+  const markerRules = []
+  const fontRules = []
+  const fontFaceRuleType = typeof window !== 'undefined' && window.CSSRule
+    ? window.CSSRule.FONT_FACE_RULE
+    : 5
+  for (const sheet of document.styleSheets) {
+    let rules
+    try {
+      rules = [...sheet.cssRules]
+    } catch {
+      continue
+    }
+    const rulesText = rules.map(rule => rule.cssText).join('\n')
+    if (rulesText.includes('.custom-marker-whole-orbit')) {
+      markerRules.push(rulesText)
+    }
+    for (const rule of rules) {
+      if (rule.type !== fontFaceRuleType) continue
+      fontRules.push(await inlineCssUrls(rule.cssText, sheet.href || document.baseURI))
+    }
+  }
+  return [...fontRules, ...markerRules].join('\n')
+}
+const exportMarkerImage = async () => {
+  const source = markerPreviewRef.value?.querySelector('.preview-target > .target-marker')
+  if (!source || imageExporting.value) return
+
+  imageExporting.value = true
+  try {
+    await document.fonts?.ready
+    const exportSize = 512
+    const exportViewportSize = 360
+    const clone = source.cloneNode(true)
+    ;[clone, ...clone.querySelectorAll('*')].forEach(element => {
+      element.style.animationPlayState = 'paused'
+      element.style.transition = 'none'
+    })
+    const cssText = (await getMarkerExportCss()).replace(/\]\]>/g, ']]]]><![CDATA[>')
+    const cloneMarkup = new XMLSerializer().serializeToString(clone)
+    const backgroundColor = draft.value.behavior.previewBackgroundColor || '#071722'
+    const backgroundMarkup = imageExportBackground.value === 'preview'
+      ? `
+    <defs>
+      <radialGradient id="preview-glow" cx="50%" cy="50%" r="72%">
+        <stop offset="0%" stop-color="rgb(80, 180, 210)" stop-opacity="0.28"/>
+        <stop offset="100%" stop-color="rgb(80, 180, 210)" stop-opacity="0"/>
+      </radialGradient>
+    </defs>
+    <rect width="${exportViewportSize}" height="${exportViewportSize}" fill="${backgroundColor}"/>
+    <rect width="${exportViewportSize}" height="${exportViewportSize}" fill="url(#preview-glow)"/>`
+      : ''
+    const svg = `<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="${exportSize}" height="${exportSize}" viewBox="0 0 ${exportViewportSize} ${exportViewportSize}">
+  <style><![CDATA[
+${cssText}
+.target-marker, .target-marker * {
+  animation-play-state: paused !important;
+  transition: none !important;
+}
+  ]]></style>${backgroundMarkup}
+  <foreignObject x="0" y="0" width="${exportViewportSize}" height="${exportViewportSize}">
+    <div xmlns="http://www.w3.org/1999/xhtml" style="position:relative;width:${exportViewportSize}px;height:${exportViewportSize}px;overflow:hidden;display:grid;place-items:center;">
+      ${cloneMarkup}
+    </div>
+  </foreignObject>
+</svg>`
+    const fileName = markerNameForSave().replace(/[\\/:*?"<>|]/g, '_')
+    downloadBlob(new Blob([svg], { type: 'image/svg+xml;charset=utf-8' }), `${fileName || 'target-marker'}.svg`)
+    libraryNotice.value = imageExportBackground.value === 'transparent'
+      ? '背景透過SVGを保存しました。'
+      : '背景付きSVGを保存しました。'
+  } catch (error) {
+    console.error('[CustomMarkerModal] marker image export failed', error)
+    libraryNotice.value = 'SVGを作成できませんでした。ブラウザのファイル出力対応を確認してください。'
+  } finally {
+    imageExporting.value = false
+  }
 }
 const openMarkerSettingsFile = () => markerSettingsFileInput.value?.click()
 const importMarkerSettings = async event => {
@@ -2613,13 +2973,20 @@ const materializePresetRing = (preset, index, color) => {
   movingAppearance.segmentLabels = [...(preset.movingAppearance.segmentLabels || idleAppearance.segmentLabels)]
   return {
     id: `preset-${Date.now()}-${index}`,
+    transformTiming: makeRingTransformTiming(),
     appearance: {
       idle: idleAppearance,
-      moving: movingAppearance
+      moving: movingAppearance,
+      transform: {
+        ...idleAppearance,
+        segmentColors: [...idleAppearance.segmentColors],
+        segmentLabels: [...idleAppearance.segmentLabels]
+      }
     },
     motion: {
       idle: staticMotion(preset.motion),
-      moving: staticMotion({ ...preset.motion, ...preset.movingMotion })
+      moving: staticMotion({ ...preset.motion, ...preset.movingMotion }),
+      transform: staticMotion(preset.motion)
     }
   }
 }
@@ -2651,7 +3018,13 @@ const applyExistingMarkerPreset = preset => {
     showCenterDot: false,
     appearance: {
       idle: { ...overall },
-      moving: { ...overall }
+      moving: { ...overall },
+      transform: { ...overall }
+    },
+    wholeMotion: {
+      idle: { ...DEFAULT_SETTINGS.wholeMotion.idle },
+      moving: { ...DEFAULT_SETTINGS.wholeMotion.moving },
+      transform: { ...DEFAULT_SETTINGS.wholeMotion.transform }
     },
     transition: { ...DEFAULT_SETTINGS.transition },
     behavior: { ...DEFAULT_SETTINGS.behavior, ...(preset.behavior || {}) },
@@ -2669,11 +3042,13 @@ const reset = () => {
     ...DEFAULT_SETTINGS,
     appearance: {
       idle: { ...DEFAULT_SETTINGS.appearance.idle },
-      moving: { ...DEFAULT_SETTINGS.appearance.moving }
+      moving: { ...DEFAULT_SETTINGS.appearance.moving },
+      transform: { ...DEFAULT_SETTINGS.appearance.transform }
     },
     wholeMotion: {
       idle: { ...DEFAULT_SETTINGS.wholeMotion.idle },
-      moving: { ...DEFAULT_SETTINGS.wholeMotion.moving }
+      moving: { ...DEFAULT_SETTINGS.wholeMotion.moving },
+      transform: { ...DEFAULT_SETTINGS.wholeMotion.transform }
     },
     transition: { ...DEFAULT_SETTINGS.transition },
     behavior: { ...DEFAULT_SETTINGS.behavior },
@@ -2690,22 +3065,60 @@ const reset = () => {
 }
 
 const selectEditingState = state => {
+  if (!EDITING_STATE_OPTIONS.some(option => option.key === state)) return
   editingState.value = state
+  if (copyDestinationState.value === state) {
+    copyDestinationState.value = EDITING_STATE_OPTIONS.find(option => option.key !== state)?.key || 'idle'
+  }
   // 編集中は対象状態の形状を固定表示し、位置移動はプレビュークリック時だけ行う。
   previewMoving.value = state === 'moving'
 }
-const copyEditingStateToOther = () => {
+const setTransformMode = mode => {
+  const normalizedMode = ['reverse', 'reset'].includes(mode) ? mode : 'none'
+  draft.value.transition.transformMode = normalizedMode
+  const enabled = normalizedMode !== 'none'
+  draft.value.wholeMotion.transform.enabled = enabled
+  draft.value.rings.forEach(ring => {
+    if (ring.transformTiming.useGlobal) ring.motion.transform.enabled = enabled
+  })
+}
+const setRingTransformMode = mode => {
+  const normalizedMode = ['reverse', 'reset'].includes(mode) ? mode : 'none'
+  selectedRingTransformTiming.value.transformMode = normalizedMode
+  selectedRing.value.motion.transform.enabled = normalizedMode !== 'none'
+}
+const onRingTransformTimingScopeChange = () => {
+  const mode = selectedRingTransformTiming.value.useGlobal
+    ? draft.value.transition.transformMode
+    : selectedRingTransformTiming.value.transformMode
+  selectedRing.value.motion.transform.enabled = mode !== 'none'
+}
+const copyEditingStateTo = destination => {
   const source = editingState.value
-  const destination = source === 'idle' ? 'moving' : 'idle'
+  if (source === destination || !EDITING_STATE_OPTIONS.some(option => option.key === destination)) return
   draft.value.appearance[destination] = { ...draft.value.appearance[source] }
-  draft.value.wholeMotion[destination] = { ...draft.value.wholeMotion[source] }
+  draft.value.wholeMotion[destination] = {
+    ...draft.value.wholeMotion[source],
+    ...(destination === 'transform'
+      ? { enabled: ['reverse', 'reset'].includes(draft.value.transition.transformMode) }
+      : {})
+  }
   draft.value.rings.forEach(ring => {
     ring.appearance[destination] = {
       ...ring.appearance[source],
       segmentColors: [...ring.appearance[source].segmentColors],
       segmentLabels: [...ring.appearance[source].segmentLabels]
     }
-    ring.motion[destination] = { ...ring.motion[source] }
+    ring.motion[destination] = {
+      ...ring.motion[source],
+      ...(destination === 'transform'
+        ? {
+            enabled: ring.transformTiming.useGlobal
+              ? ['reverse', 'reset'].includes(draft.value.transition.transformMode)
+              : ['reverse', 'reset'].includes(ring.transformTiming.transformMode)
+          }
+        : {})
+    }
   })
 }
 
@@ -3048,6 +3461,7 @@ p { margin-top: 8px; color: rgba(200, 240, 250, 0.72); font-size: 20px; line-hei
 
 .editor-state-tabs {
   display: flex;
+  flex-wrap: wrap;
   grid-column: 1 / -1;
   align-items: center;
   gap: 8px;
@@ -3062,8 +3476,8 @@ p { margin-top: 8px; color: rgba(200, 240, 250, 0.72); font-size: 20px; line-hei
 }
 .editor-state-tabs button {
   width: auto;
-  min-width: 120px;
-  padding: 8px 14px;
+  min-width: 88px;
+  padding: 8px 10px;
   border: 1px solid rgba(126, 224, 245, 0.42);
   background: rgba(5, 23, 34, 0.8);
   color: rgba(215, 247, 255, 0.72);
@@ -3076,9 +3490,44 @@ p { margin-top: 8px; color: rgba(200, 240, 250, 0.72); font-size: 20px; line-hei
   box-shadow: 0 0 8px rgba(89, 220, 250, 0.35);
 }
 .editor-state-tabs .state-copy-button {
-  min-width: 0;
+  min-width: 72px;
+  white-space: nowrap;
   color: #ffe9a6;
   border-color: rgba(255, 222, 130, 0.5);
+}
+.state-copy-select {
+  min-width: 112px;
+  padding: 8px 10px;
+  border: 1px solid rgba(255, 222, 130, 0.5);
+  background: rgba(5, 23, 34, 0.9);
+  color: #ffe9a6;
+}
+.transform-mode-control {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+  color: #bdf7ff;
+  white-space: nowrap;
+}
+.transform-mode-control select {
+  min-width: 190px;
+  padding: 8px 10px;
+  border: 1px solid rgba(126, 224, 245, 0.5);
+  background: rgba(5, 23, 34, 0.9);
+  color: #e3fbff;
+}
+.transform-transition-settings {
+  display: grid;
+  gap: 8px;
+  margin: 10px 0 14px;
+  padding: 10px;
+  border: 1px solid rgba(255, 222, 130, 0.35);
+  background: rgba(35, 31, 12, 0.2);
+}
+.transform-transition-settings h4 {
+  margin: 0;
+  color: #ffe9a6;
 }
 
 .ring-tabs {
@@ -3403,6 +3852,40 @@ p { margin-top: 8px; color: rgba(200, 240, 250, 0.72); font-size: 20px; line-hei
 }
 .library-toolbar button { padding: 9px 10px; }
 .library-toolbar button:disabled { cursor: not-allowed; opacity: 0.4; }
+.image-export-panel {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
+  gap: 10px;
+  margin-top: 12px;
+  padding: 10px;
+  border: 1px solid rgba(126, 224, 245, 0.32);
+  background: rgba(8, 28, 40, 0.58);
+}
+.image-export-panel label {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  color: #c9f8ff;
+}
+.image-export-panel select {
+  min-width: 0;
+  border: 1px solid rgba(126, 224, 245, 0.5);
+  background: rgba(4, 19, 29, 0.92);
+  color: #e3fbff;
+  padding: 8px 10px;
+}
+.image-export-button {
+  min-height: 38px;
+  padding: 8px 14px;
+  border: 1px solid #6de8ff;
+  background: rgba(25, 92, 111, 0.88);
+  color: #fff;
+  cursor: pointer;
+}
+.image-export-button:disabled { cursor: wait; opacity: 0.6; }
 .marker-settings-file-input { display: none; }
 .library-export-note {
   margin: 10px 0 0;
@@ -3804,6 +4287,14 @@ p { margin-top: 8px; color: rgba(200, 240, 250, 0.72); font-size: 20px; line-hei
   .mobile-layout h2 { font-size: 20px; }
   .mobile-layout h3 { font-size: 18px; }
   .mobile-layout p { font-size: 15px; }
+  .mobile-layout .image-export-panel {
+    grid-template-columns: 1fr;
+    align-items: stretch;
+  }
+  .mobile-layout .image-export-panel label {
+    grid-template-columns: 72px minmax(0, 1fr);
+  }
+  .mobile-layout .image-export-button { width: 100%; }
   .mobile-layout .close-button {
     min-width: 72px;
     min-height: 44px;
@@ -3838,7 +4329,7 @@ p { margin-top: 8px; color: rgba(200, 240, 250, 0.72); font-size: 20px; line-hei
     grid-column: 1;
     grid-row: 1;
     display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-columns: repeat(3, minmax(0, 1fr));
     gap: 0;
     padding: 5px 3px 5px 5px;
     border-right: 1px solid rgba(116, 220, 245, 0.22);
@@ -3856,9 +4347,28 @@ p { margin-top: 8px; color: rgba(200, 240, 250, 0.72); font-size: 20px; line-hei
   .editor-state-tabs button:first-of-type { border-radius: 999px 0 0 999px; }
   .editor-state-tabs button:nth-of-type(2) {
     margin-left: -1px;
+    border-radius: 0;
+  }
+  .editor-state-tabs button:nth-of-type(3) {
+    margin-left: -1px;
     border-radius: 0 999px 999px 0;
   }
-  .editor-state-tabs .state-copy-button { display: none; }
+  .editor-state-tabs .state-copy-button,
+  .editor-state-tabs .state-copy-select { display: none; }
+  .editor-state-tabs .transform-mode-control {
+    grid-column: 1 / -1;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 6px;
+    margin: 5px 0 0;
+  }
+  .editor-state-tabs .transform-mode-control > span { display: none; }
+  .editor-state-tabs .transform-mode-control select {
+    min-width: 0;
+    width: 100%;
+    padding: 7px 4px;
+    font-size: 12px;
+  }
   .mobile-layout .ring-tabs,
   .mobile-layout .desktop-setting-list {
     display: none;
